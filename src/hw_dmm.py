@@ -54,6 +54,7 @@ class DMMHardware:
         self.firmware = ''
         self._min_interval_us = self.DEFAULT_MIN_INTERVAL_US
         self._min_nplc        = self.DEFAULT_MIN_NPLC
+        self._cfg             = None   # 마지막으로 적용된 DMM 설정 캐시
 
     # ------------------------------------------------------------------
     # 연결 관리
@@ -221,6 +222,7 @@ class DMMHardware:
         finally:
             self.inst = None
             self.is_connected = False
+            self._cfg = None   # 연결 해제 시 설정 캐시 초기화
             print('[DMM] 연결 해제')
 
     def identify(self) -> str:
@@ -316,27 +318,29 @@ class DMMHardware:
         print(f'[DMM] measure_dc_voltage: interval={actual_interval_us:.0f}µs  '
               f'NPLC={nplc}  model={self.model}')
 
-        # 34465A: SAMP:SOUR TIM 기본 내장 → 정밀 타이밍 제어 가능
-        # 34461A 등: DIG 옵션 없으면 TIM 미지원(-203) → IMM 사용
-        samp_cmds = (
-            ['SAMP:SOUR TIM', f'SAMP:TIM {interval_s:.6f}']
-            if self.model == '34465A'
-            else ['SAMP:SOUR IMM']
-        )
-        cmd_seq = [
-            '*CLS',
-            '*RST',
-            f'CONF:VOLT:DC {v_range}',
-            f'VOLT:DC:NPLC {nplc}',
-            f'SAMP:COUN {n_samples}',
-            *samp_cmds,
-            'TRIG:SOUR IMM',
-            'TRIG:COUN 1',
-        ]
+        # 설정 캐시 확인
+        new_cfg = {
+            'mode': 'VOLT:DC', 'range': v_range, 'nplc': nplc,
+            'n': n_samples, 'samp': 'TIM' if self.model == '34465A' else 'IMM',
+            'interval': interval_s if self.model == '34465A' else None,
+        }
+        if self._cfg != new_cfg:
+            samp_cmds = (
+                ['SAMP:SOUR TIM', f'SAMP:TIM {interval_s:.6f}']
+                if self.model == '34465A'
+                else ['SAMP:SOUR IMM']
+            )
+            for cmd in ['*RST',
+                        f'CONF:VOLT:DC {v_range}',
+                        f'VOLT:DC:NPLC {nplc}',
+                        f'SAMP:COUN {n_samples}',
+                        *samp_cmds,
+                        'TRIG:SOUR IMM',
+                        'TRIG:COUN 1']:
+                self.inst.write(cmd)
+            self._cfg = new_cfg
 
-        for cmd in cmd_seq:
-            self.inst.write(cmd)
-
+        self.inst.write('*CLS')
         t_start = time.perf_counter()
         self.inst.write('INIT')
         self.inst.write('*WAI')
@@ -398,27 +402,29 @@ class DMMHardware:
         actual_interval_us = self._clamp_interval(interval_us)
         interval_s = actual_interval_us / 1e6
 
-        # 34465A: SAMP:SOUR TIM 기본 내장 → 정밀 타이밍 제어 가능
-        # 34461A 등: DIG 옵션 없으면 TIM 미지원(-203) → IMM 사용
-        samp_cmds = (
-            ['SAMP:SOUR TIM', f'SAMP:TIM {interval_s:.6f}']
-            if self.model == '34465A'
-            else ['SAMP:SOUR IMM']
-        )
-        cmd_seq = [
-            '*CLS',
-            '*RST',
-            f'CONF:CURR:DC {i_range}',
-            'CURR:DC:NPLC 0.02',
-            f'SAMP:COUN {n_samples}',
-            *samp_cmds,
-            'TRIG:SOUR IMM',
-            'TRIG:COUN 1',
-        ]
+        # 설정 캐시 확인
+        new_cfg = {
+            'mode': 'CURR:DC', 'range': i_range, 'nplc': 0.02,
+            'n': n_samples, 'samp': 'TIM' if self.model == '34465A' else 'IMM',
+            'interval': interval_s if self.model == '34465A' else None,
+        }
+        if self._cfg != new_cfg:
+            samp_cmds = (
+                ['SAMP:SOUR TIM', f'SAMP:TIM {interval_s:.6f}']
+                if self.model == '34465A'
+                else ['SAMP:SOUR IMM']
+            )
+            for cmd in ['*RST',
+                        f'CONF:CURR:DC {i_range}',
+                        'CURR:DC:NPLC 0.02',
+                        f'SAMP:COUN {n_samples}',
+                        *samp_cmds,
+                        'TRIG:SOUR IMM',
+                        'TRIG:COUN 1']:
+                self.inst.write(cmd)
+            self._cfg = new_cfg
 
-        for cmd in cmd_seq:
-            self.inst.write(cmd)
-
+        self.inst.write('*CLS')
         t_start = time.perf_counter()
         self.inst.write('INIT')
         self.inst.write('*WAI')
@@ -482,18 +488,19 @@ class DMMHardware:
         """
         self._check_connected()
 
-        cmd_seq = [
-            '*CLS',
-            f'CONF:VOLT:DC {v_range}',
-            f'VOLT:DC:NPLC {nplc}',   # 고정밀 적분
-            'VOLT:DC:ZERO:AUTO ON',    # 오프셋 보상 ON (34461A/34465A 공통 표준 명령어)
-            'TRIG:SOUR IMM',
-            'TRIG:COUN 1',
-            'SAMP:COUN 1',
-        ]
-        for cmd in cmd_seq:
-            self.inst.write(cmd)
+        # 설정 캐시 확인
+        new_cfg = {'mode': 'VOLT:DC:PREC', 'range': v_range, 'nplc': nplc, 'n': 1}
+        if self._cfg != new_cfg:
+            for cmd in [f'CONF:VOLT:DC {v_range}',
+                        f'VOLT:DC:NPLC {nplc}',
+                        'VOLT:DC:ZERO:AUTO ON',
+                        'TRIG:SOUR IMM',
+                        'TRIG:COUN 1',
+                        'SAMP:COUN 1']:
+                self.inst.write(cmd)
+            self._cfg = new_cfg
 
+        self.inst.write('*CLS')
         # 측정 타임아웃: (NPLC / 50Hz) * 3 + 여유 2s
         timeout_s = (nplc / 50.0) * 3 + 2.0
         self.inst.timeout = int(timeout_s * 1000)
@@ -531,18 +538,19 @@ class DMMHardware:
         """
         self._check_connected()
 
-        cmd_seq = [
-            '*CLS',
-            f'CONF:CURR:DC {i_range}',
-            f'CURR:DC:NPLC {nplc}',
-            'CURR:DC:ZERO:AUTO ON',    # 오프셋 보상 ON (34461A/34465A 공통 표준 명령어)
-            'TRIG:SOUR IMM',
-            'TRIG:COUN 1',
-            'SAMP:COUN 1',
-        ]
-        for cmd in cmd_seq:
-            self.inst.write(cmd)
+        # 설정 캐시 확인
+        new_cfg = {'mode': 'CURR:DC:PREC', 'range': i_range, 'nplc': nplc, 'n': 1}
+        if self._cfg != new_cfg:
+            for cmd in [f'CONF:CURR:DC {i_range}',
+                        f'CURR:DC:NPLC {nplc}',
+                        'CURR:DC:ZERO:AUTO ON',
+                        'TRIG:SOUR IMM',
+                        'TRIG:COUN 1',
+                        'SAMP:COUN 1']:
+                self.inst.write(cmd)
+            self._cfg = new_cfg
 
+        self.inst.write('*CLS')
         timeout_s = (nplc / 50.0) * 3 + 2.0
         self.inst.timeout = int(timeout_s * 1000)
 
