@@ -471,7 +471,7 @@ class DMMHardware:
             '*CLS',
             f'CONF:VOLT:DC {v_range}',
             f'VOLT:DC:NPLC {nplc}',   # 고정밀 적분
-            'VOLT:DC:AZERO ON',        # 오프셋 보상 ON
+            'VOLT:DC:ZERO:AUTO ON',    # 오프셋 보상 ON (34461A/34465A 공통 표준 명령어)
             'TRIG:SOUR IMM',
             'TRIG:COUN 1',
             'SAMP:COUN 1',
@@ -520,7 +520,7 @@ class DMMHardware:
             '*CLS',
             f'CONF:CURR:DC {i_range}',
             f'CURR:DC:NPLC {nplc}',
-            'CURR:DC:AZERO ON',
+            'CURR:DC:ZERO:AUTO ON',    # 오프셋 보상 ON (34461A/34465A 공통 표준 명령어)
             'TRIG:SOUR IMM',
             'TRIG:COUN 1',
             'SAMP:COUN 1',
