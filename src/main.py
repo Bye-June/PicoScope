@@ -585,7 +585,10 @@ class MainWindow(QMainWindow):
 
     # ── 측정 모드 전환 ────────────────────────────────────────────
     def _set_dmm_mode(self, mode: str):
+        if mode == self._dmm_mode:
+            return  # 같은 모드면 무시
         self._dmm_mode = mode
+        self.reset_dmm_accum_stats(silent=True)  # 모드 전환 시 누적값 초기화 (단위 혼잡 방지)
         if mode == 'VOLT':
             self.dmm_btn_volt.setStyleSheet(self._dmm_mode_active_style)
             self.dmm_btn_curr.setStyleSheet(self._dmm_mode_inactive_style)
@@ -745,7 +748,7 @@ class MainWindow(QMainWindow):
         else:
             self.dmm_disp_std.setText('STD :   ------')
 
-        # 3. Verdict handling (Flash border and verdict sound)
+        # 3. Verdict handling (sound only, no border flash)
         if verdict == 'PASS':
             self.dmm_disp_verdict.setText('✔   PASS')
             self.dmm_disp_verdict.setStyleSheet(
@@ -753,10 +756,6 @@ class MainWindow(QMainWindow):
                 'background:#1B5E20;border-radius:5px;')
             self.dmm_disp_verdict.setVisible(True)
             self.play_verdict_sound(True)
-            self.dmm_display_widget.setStyleSheet(
-                "background-color:#1a3f5c; border-radius:8px; border:3px solid #4CAF50;"
-            )
-            QTimer.singleShot(1000, self.reset_dmm_border)
         elif verdict == 'FAIL':
             self.dmm_disp_verdict.setText('✘   FAIL')
             self.dmm_disp_verdict.setStyleSheet(
@@ -764,10 +763,6 @@ class MainWindow(QMainWindow):
                 'background:#B71C1C;border-radius:5px;')
             self.dmm_disp_verdict.setVisible(True)
             self.play_verdict_sound(False)
-            self.dmm_display_widget.setStyleSheet(
-                "background-color:#1a3f5c; border-radius:8px; border:3px solid #F44336;"
-            )
-            QTimer.singleShot(1000, self.reset_dmm_border)
         else:
             self.dmm_disp_verdict.setVisible(False)   # 공간 없이 숨김
 
