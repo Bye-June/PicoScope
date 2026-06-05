@@ -291,7 +291,10 @@ class MainWindow(QMainWindow):
         # 5. Result Area
         self.result_text = QTextEdit()
         self.result_text.setReadOnly(True)
-        self.result_text.setStyleSheet("font-family: Consolas, monospace; background-color: #2b2b2b; color: #a9b7c6;")
+        self.result_text.setStyleSheet(
+            "font-family: Consolas, monospace; font-size: 12px;"
+            "background-color: #1e1e2e; color: #cdd6f4;"
+        )
         right_layout.addWidget(self.result_text)
 
         return page
@@ -1527,7 +1530,11 @@ class MainWindow(QMainWindow):
             if products: self.socket_server.send_error(msg)
             return
             
-        self.result_text.setText("Testing...")
+        ts = QDateTime.currentDateTime().toString('HH:mm:ss')
+        self.result_text.append(
+            f"<span style='color:#888;'>[{ts}]</span> "
+            f"<b style='color:#89DCEB;'>Testing...</b>"
+        )
         QApplication.processEvents()
 
         try:
@@ -1616,34 +1623,116 @@ class MainWindow(QMainWindow):
 
 
 
-            # --- Build and Send Result ---
-            formatted_result = pprint.pformat(results, indent=2)
-            self.result_text.setText(f"=== DECODING RESULTS (Saved {len(saved_csvs)} CSV files) ===\n" + formatted_result)
-            
+            # --- Build HTML log & send result ---
+            ts = QDateTime.currentDateTime().toString('HH:mm:ss')
+
             if products:
-                # 송신 형식: RESULT,SN1,PASS/FAIL,SN2,PASS/FAIL (5칸, 2제품 고정)
-                result_parts = ["RESULT"]
-                for i in range(2):
-                    if i < len(products):
-                        prod = products[i]
-                        sn = prod['sn']
-                        prod_pass = all(
-                            results.get(ch, {}).get('pass', False)
-                            for ch in prod['channels'].keys()
+                # 소켓 검사: 제품별 채널 로그
+                result_parts = ['RESULT']
+                for prod in products:
+                    sn   = prod['sn']
+                    chs  = prod['channels']          # {ch: mode}
+                    prod_pass = all(
+                        results.get(ch, {}).get('pass', False)
+                        for ch in chs
+                    )
+                    prod_color  = '#a6e3a1' if prod_pass else '#f38ba8'
+                    prod_icon   = '✔' if prod_pass else '✘'
+                    prod_label  = 'PASS' if prod_pass else 'FAIL'
+
+                    self.result_text.append(
+                        f"<span style='color:#888;'>[{ts}]</span> "
+                        f"<b style='color:#cba6f7;'>{sn}</b>"
+                    )
+                    for ch, mode in sorted(chs.items()):
+                        r      = results.get(ch, {})
+                        passed = r.get('pass', False)
+                        status = r.get('status', 'unknown')
+                        icon   = '✔' if passed else '✘'
+                        color  = '#a6e3a1' if passed else '#f38ba8'
+                        label  = 'PASS' if passed else 'FAIL'
+
+                        # 모드별 세부 정보
+                        detail = ''
+                        if status == 'success':
+                            if 'measured_ut_us' in r:   # SENT
+                                detail = f"UT={r['measured_ut_us']:.3f}µs"
+                            elif 'frames' in r:          # SPC
+                                n_ok = sum(1 for f in r.get('frames', []) if f.get('pass', False))
+                                n_tot = len(r.get('frames', []))
+                                detail = f"{n_ok}/{n_tot} frames OK"
+                            elif 'v_mean' in r:          # Analog
+                                detail = f"{r['v_mean']*1000:.1f}mV p2p={r.get('p2p_noise',0)*1000:.2f}mV"
+                        elif status != 'success':
+                            detail = r.get('message', status)
+
+                        detail_html = f"  <span style='color:#888; font-size:11px;'>{detail}</span>" if detail else ''
+                        self.result_text.append(
+                            f"&nbsp;&nbsp;&nbsp;<b style='color:{color};'>{icon} Ch-{ch}</b> "
+                            f"<span style='color:#cdd6f4;'>[{mode}]</span> "
+                            f"<b style='color:{color};'>{label}</b>{detail_html}"
                         )
-                        result_parts.append(sn)
-                        result_parts.append("PASS" if prod_pass else "FAIL")
-                    else:
-                        result_parts.extend(["", ""])
+                        if r.get('message') and not passed:
+                            self.result_text.append(
+                                f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+                                f"<span style='color:#FAB387; font-size:11px;'>⚠ {r['message']}</span>"
+                            )
 
-                final_str = ",".join(result_parts)
-                self.socket_server.send_result(final_str)
+                    self.result_text.append(
+                        f"&nbsp;&nbsp;<b style='color:{prod_color}; font-size:14px;'>"
+                        f"{prod_icon} {sn} → {prod_label}</b>"
+                    )
+                    self.result_text.append("<hr style='border:0; border-top:1px solid #444;'>")
+                    result_parts.append(sn)
+                    result_parts.append(prod_label)
 
+                # 빈 자리 채우기 (2제품 고정 포맷)
+                while len(result_parts) < 5:
+                    result_parts.extend(['', ''])
+                self.socket_server.send_result(','.join(result_parts[:5]))
+
+            else:
+                # 수동 검사: 전체 채널 로그
+                self.result_text.append(
+                    f"<span style='color:#888;'>[{ts}]</span> "
+                    f"<b style='color:#89b4fa;'>Manual Test — {len(saved_csvs)} CSV saved</b>"
+                )
+                for ch in sorted(results):
+                    r      = results[ch]
+                    passed = r.get('pass', False)
+                    icon   = '✔' if passed else '✘'
+                    color  = '#a6e3a1' if passed else '#f38ba8'
+                    label  = 'PASS' if passed else 'FAIL'
+                    mode   = test_config.get(ch, {}).get('mode', '')
+
+                    detail = ''
+                    if r.get('status') == 'success':
+                        if 'measured_ut_us' in r:
+                            detail = f"UT={r['measured_ut_us']:.3f}µs"
+                        elif 'frames' in r:
+                            n_ok  = sum(1 for f in r.get('frames', []) if f.get('pass', False))
+                            n_tot = len(r.get('frames', []))
+                            detail = f"{n_ok}/{n_tot} frames OK"
+                        elif 'v_mean' in r:
+                            detail = f"{r['v_mean']*1000:.1f}mV p2p={r.get('p2p_noise',0)*1000:.2f}mV"
+                    elif r.get('message'):
+                        detail = r['message']
+
+                    detail_html = f"  <span style='color:#888; font-size:11px;'>{detail}</span>" if detail else ''
+                    self.result_text.append(
+                        f"&nbsp;&nbsp;<b style='color:{color};'>{icon} Ch-{ch}</b> "
+                        f"<span style='color:#cdd6f4;'>[{mode}]</span> "
+                        f"<b style='color:{color};'>{label}</b>{detail_html}"
+                    )
 
         except Exception as e:
-            err_msg = f"Error during test: {str(e)}"
-            self.result_text.setText(err_msg)
-            if products: self.socket_server.send_error(err_msg)
+            ts = QDateTime.currentDateTime().toString('HH:mm:ss')
+            self.result_text.append(
+                f"<span style='color:#888;'>[{ts}]</span> "
+                f"<b style='color:#f38ba8;'>❌ Error: {e}</b>"
+            )
+            if products:
+                self.socket_server.send_error(str(e))
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
