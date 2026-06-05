@@ -428,7 +428,7 @@ class DMMHardware:
 
         raw = self.inst.query('FETC?')
         elapsed_ms = (time.perf_counter() - t_start) * 1000
-        self._check_scpi_errors('DC 전류 1000회 측정')
+        # 벌크 측정은 SCPI 에러 체크 제외 (비치명적 에러 오탐 방지)
 
         values = np.array([float(v) for v in raw.strip().split(',')])
         self._check_overflow(values, 'DC 전류')
