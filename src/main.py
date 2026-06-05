@@ -1621,7 +1621,16 @@ class MainWindow(QMainWindow):
                     saved_csvs.append(csv_path)
                     print(f"[CSV] saved: {csv_path}")
 
-
+            # --- Save Waveform Image (PNG) ---
+            if capture_data:
+                if products:
+                    sn_label = '_'.join(p['sn'] for p in products)
+                    img_path = os.path.join(save_dir, f"{sn_label}_{timestamp}_waveform.png")
+                else:
+                    img_path = os.path.join(save_dir, f"MANUAL_{timestamp}_waveform.png")
+                pixmap = self.plot_widget.grab()
+                pixmap.save(img_path, 'PNG')
+                print(f"[IMG] saved: {img_path}")
 
             # --- Build HTML log & send result ---
             ts = QDateTime.currentDateTime().toString('HH:mm:ss')
