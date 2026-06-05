@@ -2,7 +2,7 @@
 socket_server.py — 마스터 VB6 ↔ PicoScope 프로그램 TCP 소켓 서버
 
 수신 명령 (마스터 → 프로그램):
-  SELECT,<화면명>                             화면 전환 (PICOSCOPE | DMM)
+  SELECT,<화면명>                             화면 전환 (PICOSCOPE | 34465A)
   START,SN1,SN2,모드1,모드2,모드3             PicoScope 검사 시작
   CETOS_V1,SN,채널,기준mV,허용mV             TOS Output 전압 측정 (1000회)
   CETOS_V2,SN,채널,하한mV,상한mV             TOS Variation 단발 측정
@@ -29,7 +29,7 @@ class MasterSocketServer(QObject):
     # ------------------------------------------------------------------
     # PicoScope 기존 검사
     start_test_requested = pyqtSignal(list)
-    # 화면 전환: 'PICOSCOPE' 또는 'DMM'
+    # 화면 전환: 'PICOSCOPE' 또는 '34465A'
     select_requested = pyqtSignal(str)
     # CE TOS Item 1: (sn, channel, target_mv, tolerance_mv)
     analog_v1_requested = pyqtSignal(str, str, float, float)
@@ -38,7 +38,7 @@ class MasterSocketServer(QObject):
     # CE TOS Item 3: (sn, channel, lower_ma, upper_ma)
     analog_i_requested = pyqtSignal(str, str, float, float)
 
-    VALID_SCREENS   = {'PICOSCOPE', 'DMM'}
+    VALID_SCREENS   = {'PICOSCOPE', '34465A'}
     VALID_V_CHANNELS = {'TSM', 'TSS', 'TSM_R', 'TSS_R'}
     VALID_I_CHANNELS = {'VCC_M', 'VCC_R'}
 
@@ -129,7 +129,7 @@ class MasterSocketServer(QObject):
             return
         screen = parts[1].upper()
         if screen not in self.VALID_SCREENS:
-            self._send_raw(f'ERROR,Unknown screen: {parts[1]}. Use PICOSCOPE or DMM')
+            self._send_raw(f'ERROR,Unknown screen: {parts[1]}. Use PICOSCOPE or 34465A')
             return
         self.select_requested.emit(screen)
         # ACK는 슬롯에서 send_select_ack() 호출로 전송

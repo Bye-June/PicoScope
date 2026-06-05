@@ -109,7 +109,7 @@ class MainWindow(QMainWindow):
                 "QPushButton:hover { background-color: #3a3a6a; color: #fff; }"
             )
         self.nav_btn_scope.clicked.connect(lambda: self._switch_page('PICOSCOPE'))
-        self.nav_btn_dmm.clicked.connect(lambda: self._switch_page('DMM'))
+        self.nav_btn_dmm.clicked.connect(lambda: self._switch_page('34465A'))
         nav_layout.addWidget(self.nav_btn_scope)
         nav_layout.addWidget(self.nav_btn_dmm)
         nav_layout.addStretch()
@@ -1162,7 +1162,7 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentIndex(0)
             self.nav_btn_scope.setStyleSheet(ACTIVE)
             self.nav_btn_dmm.setStyleSheet(INACTIVE)
-        elif screen == 'DMM':
+        elif screen == '34465A':
             self.stack.setCurrentIndex(1)
             self.nav_btn_scope.setStyleSheet(INACTIVE)
             self.nav_btn_dmm.setStyleSheet(ACTIVE)
