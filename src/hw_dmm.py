@@ -253,6 +253,26 @@ class DMMHardware:
                 f'[OVLD] {label} 오버플로우 감지 — 프로브 미연결 또는 단선 상태입니다.'
             )
 
+    def _check_scpi_errors(self, label: str = '측정'):
+        """SYST:ERR? 로 SCPI 에러 큐 확인 — 에러가 있으면 RuntimeError 발생
+
+        DMM 디스플레이에 ERROR가 표시될 때 프로브 미연결 등 하드웨어 오류를
+        소프트웨어에서 자동으로 감지합니다.
+        에러 코드 0 = No error → 정상 통과
+        """
+        try:
+            resp = self.inst.query('SYST:ERR?').strip()
+            # 응답 형식: "+0,\"No error\"" 또는 "-261,\"Data questionable\""
+            code = int(resp.split(',')[0])
+            if code != 0:
+                raise RuntimeError(
+                    f'[DMM ERR] {label} 실패 — SCPI 에러: {resp}'
+                )
+        except RuntimeError:
+            raise   # 위에서 발생한 에러 그대로 전파
+        except Exception:
+            pass    # SYST:ERR? 자체 실패 시 무시 (연결 불안정 대비)
+
     # ------------------------------------------------------------------
     # DC 전압 측정
     # ------------------------------------------------------------------
@@ -321,6 +341,7 @@ class DMMHardware:
 
         raw = self.inst.query('FETC?')
         elapsed_ms = (time.perf_counter() - t_start) * 1000
+        self._check_scpi_errors('DC 전압 1000회 측정')
 
         values = np.array([float(v) for v in raw.strip().split(',')])
         self._check_overflow(values, 'DC 전압')
@@ -392,6 +413,7 @@ class DMMHardware:
 
         raw = self.inst.query('FETC?')
         elapsed_ms = (time.perf_counter() - t_start) * 1000
+        self._check_scpi_errors('DC 전류 1000회 측정')
 
         values = np.array([float(v) for v in raw.strip().split(',')])
         self._check_overflow(values, 'DC 전류')
@@ -466,6 +488,7 @@ class DMMHardware:
         self.inst.write('*WAI')
         raw = self.inst.query('FETC?')
         elapsed_ms = (time.perf_counter() - t_start) * 1000
+        self._check_scpi_errors('정밀 DC 전압 측정')
 
         value_v = float(raw.strip().split(',')[0])
         self._check_overflow(np.array([value_v]), '정밀 DC 전압')
@@ -513,6 +536,7 @@ class DMMHardware:
         self.inst.write('*WAI')
         raw = self.inst.query('FETC?')
         elapsed_ms = (time.perf_counter() - t_start) * 1000
+        self._check_scpi_errors('정밀 DC 전류 측정')
 
         value_a = float(raw.strip().split(',')[0])
         self._check_overflow(np.array([value_a]), '정밀 DC 전류')
