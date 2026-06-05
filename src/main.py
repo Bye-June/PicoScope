@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import os
 import json
 import pprint
@@ -610,7 +610,7 @@ class MainWindow(QMainWindow):
         self.dmm_disp_value.setText('-----.------')
         self.dmm_graph.hide()
         if not silent:
-            self.dmm_result_text.appendHtml(
+            self.dmm_result_text.append(
                 "<span style='color:#FF9800; font-weight:bold;'>[SYSTEM] DMM 누적 통계가 초기화되었습니다.</span>"
             )
 
@@ -902,7 +902,7 @@ class MainWindow(QMainWindow):
                     min_v=min_v, max_v=max_v, pp=pp, std=std,
                     range_info=f'N={n} | NPLC={res["nplc"]:.0f}  AutoZero=ON'
                 )
-                self.dmm_result_text.appendHtml(
+                self.dmm_result_text.append(
                     f"<span style='color:#90CAF9;'>[Single V]</span>  "
                     f"<b>{val*1000:+10.4f} mV</b>  "
                     f"<span style='color:#888;'>(NPLC={res['nplc']:.0f}  {res['elapsed_ms']:.0f}ms  N={n})</span>"
@@ -923,13 +923,13 @@ class MainWindow(QMainWindow):
                     min_v=min_v, max_v=max_v, pp=pp, std=std,
                     range_info=f'N={n} | NPLC={res["nplc"]:.0f}  AutoZero=ON'
                 )
-                self.dmm_result_text.appendHtml(
+                self.dmm_result_text.append(
                     f"<span style='color:#90CAF9;'>[Single I]</span>  "
                     f"<b>{val*1000:+10.4f} mA</b>  "
                     f"<span style='color:#888;'>(NPLC={res['nplc']:.0f}  {res['elapsed_ms']:.0f}ms  N={n})</span>"
                 )
         except Exception as e:
-            self.dmm_result_text.appendHtml(
+            self.dmm_result_text.append(
                 f"<b style='color:#FF9800;'>[Single] 오류:</b> {e}")
         finally:
             QApplication.restoreOverrideCursor()
@@ -963,7 +963,7 @@ class MainWindow(QMainWindow):
                     n=res['n_samples'], interval_us=res['interval_us'],
                     values=res['values']
                 )
-                self.dmm_result_text.appendHtml(
+                self.dmm_result_text.append(
                     f"<span style='color:#90CAF9;'>[×1000 V]</span>  "
                     f"mean=<b>{val*1000:+10.4f} mV</b>  "
                     f"<span style='color:#888;'>min={res['min_v']*1000:.4f}  max={res['max_v']*1000:.4f}  "
@@ -980,14 +980,14 @@ class MainWindow(QMainWindow):
                     n=res['n_samples'],
                     values=res['values']
                 )
-                self.dmm_result_text.appendHtml(
+                self.dmm_result_text.append(
                     f"<span style='color:#90CAF9;'>[×1000 I]</span>  "
                     f"mean=<b>{val*1000:+10.4f} mA</b>  "
                     f"<span style='color:#888;'>min={res['min_a']*1000:.4f}  max={res['max_a']*1000:.4f}  "
                     f"std={res['std_a']*1000:.4f}  {res['elapsed_ms']:.0f}ms</span>"
                 )
         except Exception as e:
-            self.dmm_result_text.appendHtml(
+            self.dmm_result_text.append(
                 f"<b style='color:#FF9800;'>[×1000] 오류:</b> {e}")
         finally:
             QApplication.restoreOverrideCursor()
@@ -1219,14 +1219,14 @@ class MainWindow(QMainWindow):
             )
             self.socket_server.send_analog_v1_result(sn, channel, passed, min_mv, max_mv)
             color = '#4CAF50' if passed else '#F44336'
-            self.dmm_result_text.appendHtml(
+            self.dmm_result_text.append(
                 f"<b style='color:{color};'>[V1] {sn} {channel}: {verdict}</b>  "
                 f"MIN={min_mv:.3f}mV  MAX={max_mv:.3f}mV  "
                 f"<span style='color:#888;'>(허용 {lower:.1f}~{upper:.1f}mV)</span>"
             )
         except Exception as e:
             self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED')
-            self.dmm_result_text.appendHtml(
+            self.dmm_result_text.append(
                 f"<b style='color:#FF9800;'>[V1] {sn} {channel}: 측정 오류</b> — {e}")
         finally:
             QApplication.restoreOverrideCursor()
@@ -1261,14 +1261,14 @@ class MainWindow(QMainWindow):
             )
             self.socket_server.send_analog_v2_result(sn, channel, passed, value_mv)
             color = '#4CAF50' if passed else '#F44336'
-            self.dmm_result_text.appendHtml(
+            self.dmm_result_text.append(
                 f"<b style='color:{color};'>[V2] {sn} {channel}: {verdict}</b>  "
                 f"{value_mv:.4f}mV  "
                 f"<span style='color:#888;'>(허용 {lower_mv:.1f}~{upper_mv:.1f}mV)  NPLC=10  {res['elapsed_ms']:.0f}ms</span>"
             )
         except Exception as e:
             self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED')
-            self.dmm_result_text.appendHtml(
+            self.dmm_result_text.append(
                 f"<b style='color:#FF9800;'>[V2] {sn} {channel}: 측정 오류</b> — {e}")
         finally:
             QApplication.restoreOverrideCursor()
@@ -1303,14 +1303,14 @@ class MainWindow(QMainWindow):
             )
             self.socket_server.send_analog_i_result(sn, channel, passed, value_ma)
             color = '#4CAF50' if passed else '#F44336'
-            self.dmm_result_text.appendHtml(
+            self.dmm_result_text.append(
                 f"<b style='color:{color};'>[I]  {sn} {channel}: {verdict}</b>  "
                 f"{value_ma:.4f}mA  "
                 f"<span style='color:#888;'>(허용 {lower_ma:.1f}~{upper_ma:.1f}mA)  NPLC=10  {res['elapsed_ms']:.0f}ms</span>"
             )
         except Exception as e:
             self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED')
-            self.dmm_result_text.appendHtml(
+            self.dmm_result_text.append(
                 f"<b style='color:#FF9800;'>[I]  {sn} {channel}: 측정 오류</b> — {e}")
         finally:
             QApplication.restoreOverrideCursor()
