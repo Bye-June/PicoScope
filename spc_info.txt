@@ -1,0 +1,98 @@
+transmit data based on a trigger pulse sent by an external ECU.  It supports point to
+---
+ Trigger with constant, variable length  and short trigger pulse (point-2-point)
+---
+SAE J2716 SENT protocol. SPC is a synchr onous SENT output, triggered by a master
+---
+– Trigger pulse from a master device (the length depends on the operation mode)
+---
+The parameter of the Master  Trigger Pulse are defined in  Section 5.9. on page 47 and
+---
+15 enable_sample_sync Enables the synchronization of internal sample clock to the external trigger pulse. In 
+---
+this mode, the internal sample clock is stopped with each trigger sync and starts after 
+---
+14:8 target_signal_age Defines the target signal age befo re the external trigger pulse arrives, when the inter-
+---
+9 spc_trigger_pulse Type of SPC trigger pulse in case of ID selection mode:
+---
+0: Constant trigger pulse (90 UT)
+---
+1: Variable trigger pulse (t
+---
+1 Trigger Pulse Trigger pulse from the master.
+---
+Trigger Pulse Sync. pulse Data nibbles Pause pulse
+---
+Trigger pulse Sync. pulse SCN+SCM D1 D2 D3 CS Pause pulse
+---
+Trigger pulse Sync. pulse SCN+ID D1 D2 D3 CS Pause pulse
+---
+1 Trigger Pulse Trigger pulse from the master.
+---
+Trigger 
+---
+Trigger 
+---
+Trigger 
+---
+ECU starts the bidirectional communication by sending a trigger pulse. The sensor then
+---
+Each ID is linked with a fixed master low time during the trigger pulse.
+---
+– Bus mode with constant length trigger pulse
+---
+– Bus mode with variable length trigger pulse
+---
+The way of triggering the device can be defined by bit[9] of the SETUP_PROTOCOL
+---
+The length of the trigger pulse is fixed for all addresses in case of the constant length
+---
+trigger pulse and addressing is done via a variable master low time.
+---
+use ID = 00. This ensures  more tolerance to cloc k and trigger threshold
+---
+For the variable length trigge r pulse the ECU sends  a trigger pulse of variable length
+---
+with a variable length low time. This trigger pulse is called “variable length” since the
+---
+time between the falling edge of  the trigger pulse and the start of the frame (first falling
+---
+Fig. 3–13: SPC bus mode, constant length trigger pulse timing
+---
+start of protocol by sensor (end of trigger pulse)
+---
+start of trigger pulse by ECU
+---
+tmtr:Total master trigger pulse lengthDATA SHEET HAR 3970-2301
+---
+Fig. 3–14: SPC bus mode, variable length trigger pulse timing
+---
+start of trigger pulse by ECU
+---
+start of protocol by sensor (ID00, end of trigger pulse)
+---
+start of protocol by sensor (ID01, end of trigger pulse)
+---
+start of protocol by sensor (ID10, end of trigger pulse)
+---
+ttpl_v: Total variable trigger pulse lengthDATA SHEET HAR 3970-2301
+---
+Note: Bits[7:0] can not be read via the programming interface as they are triggering immediately a reset of the 
+---
+(Output ready for trigger)
+---
+Trigger Pulse Parameter (Fig. 5–6 on page 49)
+---
+Vthf Trigger Pulse Parameter OUTx 1.0 1.3 1.7 V 1)
+---
+tmtr Master Trigger Pulse Length OUTx  13  UT 1)Synchronous mode
+---
+Sensor SPC trigger parameter (Bus mode: on)4)
+---
+ECU SPC trigger parameter (Bus mode: on)4)
+---
+ttpl_v Total Variable Trigger Pulse 
+---
+Ready for first trigger pulse
+---
