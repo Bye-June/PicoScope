@@ -244,6 +244,15 @@ class DMMHardware:
         if not self.is_connected or self.inst is None:
             raise RuntimeError('DMM가 연결되지 않았습니다.')
 
+    @staticmethod
+    def _check_overflow(values: 'np.ndarray', label: str = '측정값'):
+        """SCPI 오버플로우값(9.9E+37) 감지 → 단선/미연결로 판단하여 예외 발생"""
+        OVERFLOW = 9.9e+37
+        if np.any(np.abs(values) >= OVERFLOW * 0.99):
+            raise RuntimeError(
+                f'[OVLD] {label} 오버플로우 감지 — 프로브 미연결 또는 단선 상태입니다.'
+            )
+
     # ------------------------------------------------------------------
     # DC 전압 측정
     # ------------------------------------------------------------------
@@ -314,6 +323,7 @@ class DMMHardware:
         elapsed_ms = (time.perf_counter() - t_start) * 1000
 
         values = np.array([float(v) for v in raw.strip().split(',')])
+        self._check_overflow(values, 'DC 전압')
 
         return {
             'mean_v':           float(np.mean(values)),
@@ -384,6 +394,7 @@ class DMMHardware:
         elapsed_ms = (time.perf_counter() - t_start) * 1000
 
         values = np.array([float(v) for v in raw.strip().split(',')])
+        self._check_overflow(values, 'DC 전류')
 
         return {
             'mean_a':     float(np.mean(values)),
@@ -457,6 +468,7 @@ class DMMHardware:
         elapsed_ms = (time.perf_counter() - t_start) * 1000
 
         value_v = float(raw.strip().split(',')[0])
+        self._check_overflow(np.array([value_v]), '정밀 DC 전압')
         return {
             'value_v':    value_v,
             'nplc':       nplc,
@@ -503,6 +515,7 @@ class DMMHardware:
         elapsed_ms = (time.perf_counter() - t_start) * 1000
 
         value_a = float(raw.strip().split(',')[0])
+        self._check_overflow(np.array([value_a]), '정밀 DC 전류')
         return {
             'value_a':    value_a,
             'nplc':       nplc,
