@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import os
 import json
 import pprint
@@ -313,7 +313,7 @@ class MainWindow(QMainWindow):
     # ── 디스플레이 패널 ────────────────────────────────────────────
     def _build_dmm_display_panel(self) -> QWidget:
         """실제 Keysight DMM 화면과 유사한 디스플레이 패널"""
-        BG   = '#1a3f5c'   # 짙은 청록 (34461A 실물 디스플레이색)
+        BG   = '#1a3f5c'   # 짙은 청록 (34465A 실물 디스플레이색)
         GOLD = '#FFD700'
         BLUE = '#90CAF9'
         GRN  = '#66BB6A'
@@ -449,7 +449,7 @@ class MainWindow(QMainWindow):
         vl.setSpacing(6)
 
         # ── 연결 ──
-        conn_group = QGroupBox('DMM Connection (Keysight 34461A / 34465A)')
+        conn_group = QGroupBox('DMM Connection (Keysight 34465A)')
         conn_vl = QVBoxLayout()
         conn_vl.setSpacing(4)
 
