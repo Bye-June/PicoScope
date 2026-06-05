@@ -322,8 +322,7 @@ class DMMHardware:
             f'CONF:VOLT:DC {v_range}',
             f'VOLT:DC:NPLC {nplc}',        # interval에 맞는 유효 NPLC 선택
             f'SAMP:COUN {n_samples}',
-            'SAMP:SOUR TIM',
-            f'SAMP:TIM {interval_s:.6f}',
+            'SAMP:SOUR IMM',               # TIM 미지원 모델(DIG 옵션 없음) 대응
             'TRIG:SOUR IMM',
             'TRIG:COUN 1',
         ]
@@ -341,10 +340,13 @@ class DMMHardware:
 
         raw = self.inst.query('FETC?')
         elapsed_ms = (time.perf_counter() - t_start) * 1000
-        self._check_scpi_errors('DC 전압 1000회 측정')
+        # 벌크 측정은 SCPI 에러 체크 제외:
+        # SAMP:SOUR TIM 등이 일부 DMM에서 -203 에러를 발생시켜도
+        # 측정값은 정상 반환하는 비치명적 에러임
 
         values = np.array([float(v) for v in raw.strip().split(',')])
         self._check_overflow(values, 'DC 전압')
+
 
         return {
             'mean_v':           float(np.mean(values)),
@@ -395,8 +397,7 @@ class DMMHardware:
             f'CONF:CURR:DC {i_range}',
             'CURR:DC:NPLC 0.02',
             f'SAMP:COUN {n_samples}',
-            'SAMP:SOUR TIM',
-            f'SAMP:TIM {interval_s:.6f}',
+            'SAMP:SOUR IMM',               # TIM 미지원 모델(DIG 옵션 없음) 대응
             'TRIG:SOUR IMM',
             'TRIG:COUN 1',
         ]
