@@ -316,13 +316,20 @@ class DMMHardware:
         print(f'[DMM] measure_dc_voltage: interval={actual_interval_us:.0f}µs  '
               f'NPLC={nplc}  model={self.model}')
 
+        # 34465A: SAMP:SOUR TIM 기본 내장 → 정밀 타이밍 제어 가능
+        # 34461A 등: DIG 옵션 없으면 TIM 미지원(-203) → IMM 사용
+        samp_cmds = (
+            ['SAMP:SOUR TIM', f'SAMP:TIM {interval_s:.6f}']
+            if self.model == '34465A'
+            else ['SAMP:SOUR IMM']
+        )
         cmd_seq = [
             '*CLS',
             '*RST',
             f'CONF:VOLT:DC {v_range}',
-            f'VOLT:DC:NPLC {nplc}',        # interval에 맞는 유효 NPLC 선택
+            f'VOLT:DC:NPLC {nplc}',
             f'SAMP:COUN {n_samples}',
-            'SAMP:SOUR IMM',               # TIM 미지원 모델(DIG 옵션 없음) 대응
+            *samp_cmds,
             'TRIG:SOUR IMM',
             'TRIG:COUN 1',
         ]
@@ -391,13 +398,20 @@ class DMMHardware:
         actual_interval_us = self._clamp_interval(interval_us)
         interval_s = actual_interval_us / 1e6
 
+        # 34465A: SAMP:SOUR TIM 기본 내장 → 정밀 타이밍 제어 가능
+        # 34461A 등: DIG 옵션 없으면 TIM 미지원(-203) → IMM 사용
+        samp_cmds = (
+            ['SAMP:SOUR TIM', f'SAMP:TIM {interval_s:.6f}']
+            if self.model == '34465A'
+            else ['SAMP:SOUR IMM']
+        )
         cmd_seq = [
             '*CLS',
             '*RST',
             f'CONF:CURR:DC {i_range}',
             'CURR:DC:NPLC 0.02',
             f'SAMP:COUN {n_samples}',
-            'SAMP:SOUR IMM',               # TIM 미지원 모델(DIG 옵션 없음) 대응
+            *samp_cmds,
             'TRIG:SOUR IMM',
             'TRIG:COUN 1',
         ]
