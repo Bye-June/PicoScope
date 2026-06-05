@@ -3,6 +3,7 @@ import os
 import json
 import pprint
 import numpy as np
+import winsound
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QComboBox, QLabel, QTextEdit,
                              QGroupBox, QGridLayout, QRadioButton, QButtonGroup, QCheckBox,
@@ -41,6 +42,8 @@ class MainWindow(QMainWindow):
         # DMM
         self.dmm = DMMHardware()
         self.current_screen = 'PICOSCOPE'  # SELECT 명령으로 변경
+        self.dmm_accum_values = []  # DMM Single 누적 통계값 저장
+        self._dmm_proxy = None      # DMM 그래프 마우스 이동 SignalProxy
         
         self.channels = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
         self.ui_state = {}
@@ -110,6 +113,14 @@ class MainWindow(QMainWindow):
         nav_layout.addWidget(self.nav_btn_scope)
         nav_layout.addWidget(self.nav_btn_dmm)
         nav_layout.addStretch()
+
+        # 상단바 우측에 음향 체크박스 배치 (레이아웃 손상 없이 깔끔하게)
+        self.sound_chk = QCheckBox("🔊 Sound Alarm")
+        self.sound_chk.setStyleSheet("color: #aaa; font-weight: bold; font-size: 12px; margin-right: 12px;")
+        self.sound_chk.setChecked(True)
+        self.sound_chk.stateChanged.connect(lambda: self.save_config())
+        nav_layout.addWidget(self.sound_chk)
+
         root_layout.addWidget(nav_bar)
 
         # ── QStackedWidget ──────────────────────────────────────────
@@ -151,6 +162,12 @@ class MainWindow(QMainWindow):
         self.connect_btn.clicked.connect(self.toggle_connection)
         conn_layout.addWidget(self.connect_btn)
 
+        # PicoScope 연결 상태 LED
+        self.scope_led = QLabel()
+        self.scope_led.setFixedSize(12, 12)
+        self.scope_led.setStyleSheet("background-color: #888888; border-radius: 6px; border: 1px solid #555;")
+        conn_layout.addWidget(self.scope_led)
+
         self.dev_info_label = QLabel("Device: Not Connected")
         self.dev_info_label.setStyleSheet("color: #aaa;")
         conn_layout.addWidget(self.dev_info_label)
@@ -170,11 +187,23 @@ class MainWindow(QMainWindow):
         probe_options = ["x1", "x10"]
         bw_options = ["20MHz", "Full"]
         
+        ch_colors = {
+            'A': '#2196F3', # Blue
+            'B': '#F44336', # Red
+            'C': '#4CAF50', # Green
+            'D': '#FFC107', # Yellow
+            'E': '#9C27B0', # Purple
+            'F': '#9E9E9E', # Grey
+            'G': '#00BCD4', # Cyan
+            'H': '#E91E63'  # Pink
+        }
         for i, ch in enumerate(self.channels):
             row = i
             col_offset = 0
             
-            grid.addWidget(QLabel(f"Ch {ch}:"), row, col_offset)
+            ch_label = QLabel(f"Ch {ch}:")
+            ch_label.setStyleSheet(f"color: {ch_colors[ch]}; font-weight: bold; font-size: 12px;")
+            grid.addWidget(ch_label, row, col_offset)
             
             c_mode = QComboBox()
             c_mode.addItems(mode_options)
@@ -289,9 +318,9 @@ class MainWindow(QMainWindow):
         BLUE = '#90CAF9'
         GRN  = '#66BB6A'
 
-        panel = QWidget()
-        panel.setStyleSheet(f'background-color:{BG}; border-radius:8px;')
-        vl = QVBoxLayout(panel)
+        self.dmm_display_widget = QWidget()
+        self.dmm_display_widget.setStyleSheet(f'background-color:{BG}; border-radius:8px;')
+        vl = QVBoxLayout(self.dmm_display_widget)
         vl.setContentsMargins(20, 14, 20, 14)
         vl.setSpacing(0)
 
@@ -408,7 +437,7 @@ class MainWindow(QMainWindow):
         self.dmm_disp_verdict.setVisible(False)  # 시작 시 숨김 (공간 점유 없음)
         vl.addWidget(self.dmm_disp_verdict)
 
-        return panel
+        return self.dmm_display_widget
 
 
     # ── 컨트롤 패널 ───────────────────────────────────────────────
@@ -459,9 +488,17 @@ class MainWindow(QMainWindow):
         r2.addWidget(self.dmm_connect_btn)
         conn_vl.addLayout(r2)
 
-        self.dmm_status_label = QLabel('● Not Connected')
+        dmm_status_layout = QHBoxLayout()
+        self.dmm_led = QLabel()
+        self.dmm_led.setFixedSize(12, 12)
+        self.dmm_led.setStyleSheet("background-color: #888888; border-radius: 6px; border: 1px solid #555;")
+        dmm_status_layout.addWidget(self.dmm_led)
+
+        self.dmm_status_label = QLabel('Not Connected')
         self.dmm_status_label.setStyleSheet('color:#888;font-weight:bold;font-size:12px;')
-        conn_vl.addWidget(self.dmm_status_label)
+        dmm_status_layout.addWidget(self.dmm_status_label)
+        dmm_status_layout.addStretch()
+        conn_vl.addLayout(dmm_status_layout)
         conn_group.setLayout(conn_vl)
         vl.addWidget(conn_group)
 
@@ -498,23 +535,35 @@ class MainWindow(QMainWindow):
         btn_row = QHBoxLayout()
         self.dmm_single_btn = QPushButton('⚡  Single')
         self.dmm_1000_btn   = QPushButton('🔁  × 1000  (50 µs)')
-        for btn in (self.dmm_single_btn, self.dmm_1000_btn):
+        self.dmm_reset_stats_btn = QPushButton('🔄  Reset Stats')
+        for btn in (self.dmm_single_btn, self.dmm_1000_btn, self.dmm_reset_stats_btn):
             btn.setFixedHeight(36)
+            
+        for btn in (self.dmm_single_btn, self.dmm_1000_btn):
             btn.setStyleSheet(
                 'QPushButton{background:#2E7D32;color:white;font-weight:bold;'
                 'border-radius:4px;font-size:12px;}'
                 'QPushButton:hover{background:#388E3C;}'
                 'QPushButton:pressed{background:#1B5E20;}'
                 'QPushButton:disabled{background:#1a1a1a;color:#555;}')
+        self.dmm_reset_stats_btn.setStyleSheet(
+            'QPushButton{background:#37474F;color:#eee;font-weight:bold;border-radius:4px;font-size:12px;}'
+            'QPushButton:hover{background:#455A64;}'
+            'QPushButton:pressed{background:#263238;}'
+            'QPushButton:disabled{background:#1a1a1a;color:#555;}')
+            
         self.dmm_single_btn.clicked.connect(self._manual_measure_single)
         self.dmm_1000_btn.clicked.connect(self._manual_measure_1000)
+        self.dmm_reset_stats_btn.clicked.connect(self.reset_dmm_accum_stats)
+        
         btn_row.addWidget(self.dmm_single_btn)
         btn_row.addWidget(self.dmm_1000_btn)
+        btn_row.addWidget(self.dmm_reset_stats_btn)
         m_vl.addLayout(btn_row)
 
         # DMM 미연결 초기 상태: 동작 버튼 비활성화
         for btn in (self.dmm_btn_volt, self.dmm_btn_curr,
-                    self.dmm_single_btn, self.dmm_1000_btn):
+                    self.dmm_single_btn, self.dmm_1000_btn, self.dmm_reset_stats_btn):
             btn.setEnabled(False)
 
         meas_group.setLayout(m_vl)
@@ -548,6 +597,38 @@ class MainWindow(QMainWindow):
             self.dmm_disp_mode.setText('DC Current')
             self.dmm_disp_unit.setText('ADC')
 
+    def reset_dmm_accum_stats(self, silent=False):
+        """DMM Single 누적 통계 데이터를 초기화하고 화면을 갱신합니다."""
+        self.dmm_accum_values = []
+        self.dmm_disp_min.setText('MIN :   ------')
+        self.dmm_disp_max.setText('MAX :   ------')
+        self.dmm_disp_pp.setText('P-P :   ------')
+        self.dmm_disp_std.setText('STD :   ------')
+        self.dmm_disp_value.setText('-----.------')
+        self.dmm_graph.hide()
+        if not silent:
+            self.dmm_result_text.appendHtml(
+                "<span style='color:#FF9800; font-weight:bold;'>[SYSTEM] DMM 누적 통계가 초기화되었습니다.</span>"
+            )
+
+    def play_verdict_sound(self, passed: bool):
+        """판정 결과에 따른 알림음 비동기 재생 (winsound)"""
+        if hasattr(self, 'sound_chk') and self.sound_chk.isChecked():
+            try:
+                if passed:
+                    winsound.MessageBeep(winsound.MB_OK)
+                else:
+                    winsound.MessageBeep(winsound.MB_ICONHAND)
+            except Exception as e:
+                print(f"[Sound] 사운드 재생 실패: {e}")
+
+    def reset_dmm_border(self):
+        """DMM 디스플레이 패널 테두리를 원래대로 되돌립니다."""
+        if hasattr(self, 'dmm_display_widget'):
+            self.dmm_display_widget.setStyleSheet(
+                "background-color:#1a3f5c; border-radius:8px;"
+            )
+
     # ── 디스플레이 업데이트 ───────────────────────────────────────
     def _update_dmm_display(self, value: float, unit: str,
                              min_v=None, max_v=None,
@@ -572,60 +653,121 @@ class MainWindow(QMainWindow):
             values     : np.ndarray 원시 측정값 (1000회 시 그래프 표시)
             limits     : (lower, upper) 허용 범위 표시 (mV or mA)
         """
-        is_volt = (unit == 'VDC')
-        scale   = 1000.0
-        unit_s  = 'mV' if is_volt else 'mA'
-
-        # 메인 수치 포맷 (7자리 소수점)
-        if abs(value) < 10:
-            txt = f'{value:+10.6f}'
-        elif abs(value) < 100:
-            txt = f'{value:+10.5f}'
+        # 1. Auto-Ranging (V -> mV, A -> mA if < 1.0/0.1)
+        disp_value = value
+        disp_unit = unit
+        stat_scale = 1000.0
+        
+        if unit == 'VDC':
+            if abs(value) < 1.0:
+                disp_value = value * 1000.0
+                disp_unit = 'mVDC'
+                stat_scale = 1000.0
+                stat_unit = 'mV'
+            else:
+                disp_value = value
+                disp_unit = 'VDC'
+                stat_scale = 1.0
+                stat_unit = 'V'
+        elif unit == 'ADC':
+            if abs(value) < 0.1:
+                disp_value = value * 1000.0
+                disp_unit = 'mADC'
+                stat_scale = 1000.0
+                stat_unit = 'mA'
+            else:
+                disp_value = value
+                disp_unit = 'ADC'
+                stat_scale = 1.0
+                stat_unit = 'A'
         else:
-            txt = f'{value:+10.4f}'
+            stat_scale = 1.0
+            stat_unit = ''
+
+        # 메인 수치 포맷 (7자리 소수점 맞춤)
+        if abs(disp_value) < 10:
+            txt = f'{disp_value:+10.6f}'
+        elif abs(disp_value) < 100:
+            txt = f'{disp_value:+10.5f}'
+        else:
+            txt = f'{disp_value:+10.4f}'
         self.dmm_disp_value.setText(txt)
-        self.dmm_disp_unit.setText(unit)
+        self.dmm_disp_unit.setText(disp_unit)
+
+        # 2. Limit Gauge
+        gauge_text = ""
+        if limits is not None:
+            lo, hi = limits
+            val_scaled = value * 1000.0
+            if hi != lo:
+                frac = (val_scaled - lo) / (hi - lo)
+                if frac < 0:
+                    gauge_text = "Lo < [●------] Hi"
+                elif frac > 1:
+                    gauge_text = "Lo [------●] > Hi"
+                else:
+                    idx = int(round(frac * 6))
+                    chars = ['-'] * 7
+                    chars[idx] = '●'
+                    gauge_text = f"Lo [{''.join(chars)}] Hi"
+            else:
+                gauge_text = "Lo [---●---] Hi"
 
         # 레인지/샘플 정보
         if range_info:
-            self.dmm_disp_range.setText(range_info)
+            full_range_info = f"{range_info}   |   {gauge_text}" if gauge_text else range_info
+            self.dmm_disp_range.setText(full_range_info)
         elif n > 1:
             iv = f'{interval_us:.0f}µs' if interval_us else '?'
-            self.dmm_disp_range.setText(f'N = {n}  |  interval = {iv}')
+            info_str = f'N = {n}  |  interval = {iv}'
+            full_range_info = f"{info_str}   |   {gauge_text}" if gauge_text else info_str
+            self.dmm_disp_range.setText(full_range_info)
         else:
-            self.dmm_disp_range.setText('N = 1  |  Single')
+            info_str = 'N = 1  |  Single'
+            full_range_info = f"{info_str}   |   {gauge_text}" if gauge_text else info_str
+            self.dmm_disp_range.setText(full_range_info)
 
-        # MIN / MAX
+        # MIN / MAX (메인 스케일에 동기화)
         if min_v is not None and max_v is not None:
-            self.dmm_disp_min.setText(f'MIN :  {min_v*scale:+10.4f} {unit_s}')
-            self.dmm_disp_max.setText(f'MAX :  {max_v*scale:+10.4f} {unit_s}')
+            self.dmm_disp_min.setText(f'MIN :  {min_v*stat_scale:+10.4f} {stat_unit}')
+            self.dmm_disp_max.setText(f'MAX :  {max_v*stat_scale:+10.4f} {stat_unit}')
         else:
             self.dmm_disp_min.setText('MIN :   ------')
             self.dmm_disp_max.setText('MAX :   ------')
 
-        # P-P / STD
+        # P-P / STD (메인 스케일에 동기화)
         if pp is not None:
-            self.dmm_disp_pp.setText(f'P-P :  {pp*scale:.4f} {unit_s}')
+            self.dmm_disp_pp.setText(f'P-P :  {pp*stat_scale:.4f} {stat_unit}')
         else:
             self.dmm_disp_pp.setText('P-P :   ------')
         if std is not None:
-            self.dmm_disp_std.setText(f'STD :  {std*scale:.4f} {unit_s}')
+            self.dmm_disp_std.setText(f'STD :  {std*stat_scale:.4f} {stat_unit}')
         else:
             self.dmm_disp_std.setText('STD :   ------')
 
-        # PASS / FAIL 배너
+        # 3. Verdict handling (Flash border and verdict sound)
         if verdict == 'PASS':
             self.dmm_disp_verdict.setText('✔   PASS')
             self.dmm_disp_verdict.setStyleSheet(
                 'color:white;font-size:24px;font-weight:bold;'
                 'background:#1B5E20;border-radius:5px;')
             self.dmm_disp_verdict.setVisible(True)
+            self.play_verdict_sound(True)
+            self.dmm_display_widget.setStyleSheet(
+                "background-color:#1a3f5c; border-radius:8px; border:3px solid #4CAF50;"
+            )
+            QTimer.singleShot(1000, self.reset_dmm_border)
         elif verdict == 'FAIL':
             self.dmm_disp_verdict.setText('✘   FAIL')
             self.dmm_disp_verdict.setStyleSheet(
                 'color:white;font-size:24px;font-weight:bold;'
                 'background:#B71C1C;border-radius:5px;')
             self.dmm_disp_verdict.setVisible(True)
+            self.play_verdict_sound(False)
+            self.dmm_display_widget.setStyleSheet(
+                "background-color:#1a3f5c; border-radius:8px; border:3px solid #F44336;"
+            )
+            QTimer.singleShot(1000, self.reset_dmm_border)
         else:
             self.dmm_disp_verdict.setVisible(False)   # 공간 없이 숨김
 
@@ -664,7 +806,74 @@ class MainWindow(QMainWindow):
             self.dmm_graph.setYRange(y_min - pad, y_max + pad, padding=0)
             self.dmm_graph.setLabel('left',  unit_s, color='#4a7a7a')
             self.dmm_graph.setLabel('bottom', 'Sample', color='#4a7a7a')
+
+            # ── 8. 십자선 (Crosshair) + 호버 툴팁 ──
+            # 이미 추가되어 있는 십자선/툴팁 아이템 정리
+            for attr in ('_ch_vline', '_ch_hline', '_ch_tooltip'):
+                old = getattr(self, attr, None)
+                if old is not None:
+                    try:
+                        self.dmm_graph.removeItem(old)
+                    except Exception:
+                        pass
+
+            # 수직/수평 십자선
+            self._ch_vline = pg.InfiniteLine(
+                angle=90, movable=False,
+                pen=pg.mkPen('#FFD740', width=1, style=Qt.PenStyle.DashLine))
+            self._ch_hline = pg.InfiniteLine(
+                angle=0,  movable=False,
+                pen=pg.mkPen('#FFD740', width=1, style=Qt.PenStyle.DashLine))
+            self._ch_vline.setVisible(False)
+            self._ch_hline.setVisible(False)
+            self.dmm_graph.addItem(self._ch_vline)
+            self.dmm_graph.addItem(self._ch_hline)
+
+            # 툴팁 TextItem
+            self._ch_tooltip = pg.TextItem(
+                text='', color='#FFD740',
+                anchor=(0, 1),
+                fill=pg.mkBrush(0, 0, 0, 160))
+            self._ch_tooltip.setVisible(False)
+            self.dmm_graph.addItem(self._ch_tooltip)
+
+            # 데이터를 클로저로 캐펵 (signal에 연결)
+            _mv_ref = mv.copy()
+            _x_ref  = x
+
+            def _on_mouse_move(pos, _mv=_mv_ref, _x=_x_ref):
+                try:
+                    if not self.dmm_graph.sceneBoundingRect().contains(pos):
+                        self._ch_vline.setVisible(False)
+                        self._ch_hline.setVisible(False)
+                        self._ch_tooltip.setVisible(False)
+                        return
+                    mp    = self.dmm_graph.plotItem.vb.mapSceneToView(pos)
+                    xi    = int(round(mp.x()))
+                    xi    = max(0, min(xi, len(_mv) - 1))
+                    yi    = _mv[xi]
+                    self._ch_vline.setPos(xi)
+                    self._ch_hline.setPos(yi)
+                    self._ch_vline.setVisible(True)
+                    self._ch_hline.setVisible(True)
+                    self._ch_tooltip.setText(f'idx={xi}\n{yi:.4f} {unit_s}')
+                    self._ch_tooltip.setPos(xi, yi)
+                    self._ch_tooltip.setVisible(True)
+                except Exception:
+                    pass
+
+            # 이전 신호 연결 해제를 위해 이전 호버 햄들러 저장
+            if hasattr(self, '_dmm_proxy') and self._dmm_proxy is not None:
+                try:
+                    self._dmm_proxy.disconnect()
+                except Exception:
+                    pass
+            self._dmm_proxy = pg.SignalProxy(
+                self.dmm_graph.scene().sigMouseMoved,
+                rateLimit=30, slot=lambda args: _on_mouse_move(args[0]))
+
             self.dmm_graph.show()
+
         else:
             self.dmm_graph.hide()
 
@@ -673,36 +882,64 @@ class MainWindow(QMainWindow):
         """수동 단발 측정 — 정밀 설정 사용 (NPLC 10, AutoZero ON)"""
         if not self._ensure_dmm_connected('MANUAL'):
             return
+        self.dmm_single_btn.setEnabled(False)
+        self.dmm_single_btn.setText('측정 중...')
         self.dmm_disp_trigger.setText('● Measuring (Precision)...')
         self.dmm_disp_trigger.setStyleSheet(
             'color:#FFA726;font-size:13px;background:transparent;')
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         QApplication.processEvents()
         try:
             if self._dmm_mode == 'VOLT':
                 res  = self.dmm.measure_precision_voltage()
                 val  = res['value_v']
                 unit = 'VDC'
+                # 누적 통계에 추가
+                self.dmm_accum_values.append(val)
+                n = len(self.dmm_accum_values)
+                arr = self.dmm_accum_values
+                import numpy as _np
+                min_v = min(arr);  max_v = max(arr)
+                pp    = max_v - min_v
+                std   = float(_np.std(arr)) if n > 1 else 0.0
                 self._update_dmm_display(
                     val, unit,
-                    range_info=f'N=1 | NPLC={res["nplc"]:.0f}  AutoZero=ON'
+                    min_v=min_v, max_v=max_v, pp=pp, std=std,
+                    range_info=f'N={n} | NPLC={res["nplc"]:.0f}  AutoZero=ON'
                 )
-                self.dmm_result_text.append(
-                    f'[Single V]  {val*1000:+10.4f} mV  '
-                    f'(NPLC={res["nplc"]:.0f}  {res["elapsed_ms"]:.0f}ms)')
+                self.dmm_result_text.appendHtml(
+                    f"<span style='color:#90CAF9;'>[Single V]</span>  "
+                    f"<b>{val*1000:+10.4f} mV</b>  "
+                    f"<span style='color:#888;'>(NPLC={res['nplc']:.0f}  {res['elapsed_ms']:.0f}ms  N={n})</span>"
+                )
             else:
                 res  = self.dmm.measure_precision_current()
                 val  = res['value_a']
                 unit = 'ADC'
+                self.dmm_accum_values.append(val)
+                n = len(self.dmm_accum_values)
+                arr = self.dmm_accum_values
+                import numpy as _np
+                min_v = min(arr);  max_v = max(arr)
+                pp    = max_v - min_v
+                std   = float(_np.std(arr)) if n > 1 else 0.0
                 self._update_dmm_display(
                     val, unit,
-                    range_info=f'N=1 | NPLC={res["nplc"]:.0f}  AutoZero=ON'
+                    min_v=min_v, max_v=max_v, pp=pp, std=std,
+                    range_info=f'N={n} | NPLC={res["nplc"]:.0f}  AutoZero=ON'
                 )
-                self.dmm_result_text.append(
-                    f'[Single I]  {val*1000:+10.4f} mA  '
-                    f'(NPLC={res["nplc"]:.0f}  {res["elapsed_ms"]:.0f}ms)')
+                self.dmm_result_text.appendHtml(
+                    f"<span style='color:#90CAF9;'>[Single I]</span>  "
+                    f"<b>{val*1000:+10.4f} mA</b>  "
+                    f"<span style='color:#888;'>(NPLC={res['nplc']:.0f}  {res['elapsed_ms']:.0f}ms  N={n})</span>"
+                )
         except Exception as e:
-            self.dmm_result_text.append(f'[Single] 오류: {e}')
+            self.dmm_result_text.appendHtml(
+                f"<b style='color:#FF9800;'>[Single] 오류:</b> {e}")
         finally:
+            QApplication.restoreOverrideCursor()
+            self.dmm_single_btn.setEnabled(True)
+            self.dmm_single_btn.setText('⚡  Single')
             self.dmm_disp_trigger.setText('● Auto Trigger')
             self.dmm_disp_trigger.setStyleSheet(
                 'color:#66BB6A;font-size:13px;background:transparent;')
@@ -713,9 +950,11 @@ class MainWindow(QMainWindow):
             return
         self.dmm_single_btn.setEnabled(False)
         self.dmm_1000_btn.setEnabled(False)
+        self.dmm_1000_btn.setText('측정 중...')
         self.dmm_disp_trigger.setText('● Measuring 1000× ...')
         self.dmm_disp_trigger.setStyleSheet(
             'color:#FFA726;font-size:13px;background:transparent;')
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         QApplication.processEvents()
         try:
             if self._dmm_mode == 'VOLT':
@@ -727,13 +966,14 @@ class MainWindow(QMainWindow):
                     min_v=res['min_v'], max_v=res['max_v'],
                     std=res['std_v'],   pp=res['peak_to_peak_v'],
                     n=res['n_samples'], interval_us=res['interval_us'],
-                    values=res['values']          # 그래프 표시
+                    values=res['values']
                 )
-                self.dmm_result_text.append(
-                    f'[×1000 V]  mean={val*1000:+10.4f} mV  '
-                    f'min={res["min_v"]*1000:.4f}  max={res["max_v"]*1000:.4f}  '
-                    f'std={res["std_v"]*1000:.4f}  '
-                    f'elapsed={res["elapsed_ms"]:.0f}ms')
+                self.dmm_result_text.appendHtml(
+                    f"<span style='color:#90CAF9;'>[×1000 V]</span>  "
+                    f"mean=<b>{val*1000:+10.4f} mV</b>  "
+                    f"<span style='color:#888;'>min={res['min_v']*1000:.4f}  max={res['max_v']*1000:.4f}  "
+                    f"std={res['std_v']*1000:.4f}  {res['elapsed_ms']:.0f}ms</span>"
+                )
             else:
                 res  = self.dmm.measure_dc_current(n_samples=1000, interval_us=1000.0)
                 val  = res['mean_a']
@@ -743,18 +983,22 @@ class MainWindow(QMainWindow):
                     min_v=res['min_a'], max_v=res['max_a'],
                     std=res['std_a'],
                     n=res['n_samples'],
-                    values=res['values']          # 그래프 표시
+                    values=res['values']
                 )
-                self.dmm_result_text.append(
-                    f'[×1000 I]  mean={val*1000:+10.4f} mA  '
-                    f'min={res["min_a"]*1000:.4f}  max={res["max_a"]*1000:.4f}  '
-                    f'std={res["std_a"]*1000:.4f}  '
-                    f'elapsed={res["elapsed_ms"]:.0f}ms')
+                self.dmm_result_text.appendHtml(
+                    f"<span style='color:#90CAF9;'>[×1000 I]</span>  "
+                    f"mean=<b>{val*1000:+10.4f} mA</b>  "
+                    f"<span style='color:#888;'>min={res['min_a']*1000:.4f}  max={res['max_a']*1000:.4f}  "
+                    f"std={res['std_a']*1000:.4f}  {res['elapsed_ms']:.0f}ms</span>"
+                )
         except Exception as e:
-            self.dmm_result_text.append(f'[×1000] 오류: {e}')
+            self.dmm_result_text.appendHtml(
+                f"<b style='color:#FF9800;'>[×1000] 오류:</b> {e}")
         finally:
+            QApplication.restoreOverrideCursor()
             self.dmm_single_btn.setEnabled(True)
             self.dmm_1000_btn.setEnabled(True)
+            self.dmm_1000_btn.setText('🔁  × 1000  (50 µs)')
             self.dmm_disp_trigger.setText('● Auto Trigger')
             self.dmm_disp_trigger.setStyleSheet(
                 'color:#66BB6A;font-size:13px;background:transparent;')
@@ -847,9 +1091,9 @@ class MainWindow(QMainWindow):
     # DMM 연결 관리
     # ------------------------------------------------------------------
     def _set_dmm_action_buttons_enabled(self, enabled: bool):
-        """DMM 동작 버튼(모드 선택 + 측정) 일괄 활성화/비활성화"""
+        """DMM 동작 버튼(모드 선택 + 측정 + 리셋) 일괄 활성화/비활성화"""
         for btn in (self.dmm_btn_volt, self.dmm_btn_curr,
-                    self.dmm_single_btn, self.dmm_1000_btn):
+                    self.dmm_single_btn, self.dmm_1000_btn, self.dmm_reset_stats_btn):
             btn.setEnabled(enabled)
 
     def toggle_dmm_connection(self):
@@ -865,25 +1109,43 @@ class MainWindow(QMainWindow):
             self.dmm.disconnect()
             self.dmm_connect_btn.setText('Connect')
             self.dmm_connect_btn.setStyleSheet(_STYLE_CONN)
-            self.dmm_status_label.setText('● Not Connected')
+            self.dmm_status_label.setText('Not Connected')
             self.dmm_status_label.setStyleSheet('color:#888;font-weight:bold;font-size:12px;')
+            self.dmm_led.setStyleSheet("background-color: #888888; border-radius: 6px; border: 1px solid #555;")
             self._set_dmm_action_buttons_enabled(False)   # 연결 해제 → 비활성화
         else:
+            self.dmm_connect_btn.setEnabled(False)
+            self.dmm_connect_btn.setText("Connecting...")
+            self.dmm_status_label.setText("Connecting...")
+            self.dmm_status_label.setStyleSheet("color:#FFA726;font-weight:bold;font-size:12px;")
+            self.dmm_led.setStyleSheet("background-color: #FFA726; border-radius: 6px; border: 1px solid #555;")
+            QApplication.processEvents()
+
             visa_addr = self.dmm_visa_edit.text().strip()
             if not visa_addr:
                 self.dmm_result_text.append('[DMM] VISA 주소를 입력하세요.')
+                self.dmm_connect_btn.setEnabled(True)
+                self.dmm_connect_btn.setText('Connect')
+                self.dmm_led.setStyleSheet("background-color: #888888; border-radius: 6px; border: 1px solid #555;")
+                self.dmm_status_label.setText('Not Connected')
+                self.dmm_status_label.setStyleSheet('color:#888;font-weight:bold;font-size:12px;')
                 return
             success, msg = self.dmm.connect(visa_addr)
+            self.dmm_connect_btn.setEnabled(True)
             if success:
                 self.dmm_connect_btn.setText('Disconnect')
                 self.dmm_connect_btn.setStyleSheet(_STYLE_DISC)
-                self.dmm_status_label.setText(f'● {msg}')
+                self.dmm_status_label.setText(f'{msg}')
                 self.dmm_status_label.setStyleSheet('color:#4CAF50;font-weight:bold;font-size:12px;')
+                self.dmm_led.setStyleSheet("background-color: #4CAF50; border-radius: 6px; border: 1px solid #555;")
                 self.dmm_result_text.append(f'[DMM] 연결됨: {msg}')
                 self._set_dmm_action_buttons_enabled(True)  # 연결 성공 → 활성화
             else:
-                self.dmm_status_label.setText('● Connection Failed')
+                self.dmm_connect_btn.setText('Connect')
+                self.dmm_connect_btn.setStyleSheet(_STYLE_CONN)
+                self.dmm_status_label.setText('Connection Failed')
                 self.dmm_status_label.setStyleSheet('color:#f44336;font-weight:bold;font-size:12px;')
+                self.dmm_led.setStyleSheet("background-color: #F44336; border-radius: 6px; border: 1px solid #555;")
                 self.dmm_result_text.append(f'[DMM] 연결 실패: {msg}')
                 self._set_dmm_action_buttons_enabled(False)  # 연결 실패 → 비활성화 유지
 
@@ -934,6 +1196,7 @@ class MainWindow(QMainWindow):
         """Item 1: TOS Output — 1000회 측정, MIN/MAX가 다두 범위 이내인지 판정"""
         if not self._ensure_dmm_connected(sn):
             return
+        self.reset_dmm_accum_stats(silent=True)   # 소켓 명령 수신 시 자동 누적 리셋
         lower  = target_mv - tol_mv
         upper  = target_mv + tol_mv
         range_info = f'N=1000 | 허용: {lower:.1f} ~ {upper:.1f} mV'
@@ -941,6 +1204,7 @@ class MainWindow(QMainWindow):
         self.dmm_disp_trigger.setText(f'● Measuring 1000× — {sn} {channel}')
         self.dmm_disp_trigger.setStyleSheet(
             'color:#FFA726;font-size:13px;background:transparent;')
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         QApplication.processEvents()
         try:
             result = self.dmm.measure_dc_voltage(n_samples=1000, interval_us=50.0)
@@ -955,19 +1219,22 @@ class MainWindow(QMainWindow):
                 std=result['std_v'],   pp=result['peak_to_peak_v'],
                 n=result['n_samples'], interval_us=result['interval_us'],
                 range_info=range_info, verdict=verdict,
-                values=result['values'],              # 그래프
-                limits=(lower, upper)                  # 허용 범위 선
+                values=result['values'],
+                limits=(lower, upper)
             )
             self.socket_server.send_analog_v1_result(sn, channel, passed, min_mv, max_mv)
-            self.dmm_result_text.append(
-                f'[V1] {sn} {channel}: {verdict}  '
-                f'MIN={min_mv:.3f}mV  MAX={max_mv:.3f}mV  '
-                f'(허용 {lower:.1f}~{upper:.1f}mV)'
+            color = '#4CAF50' if passed else '#F44336'
+            self.dmm_result_text.appendHtml(
+                f"<b style='color:{color};'>[V1] {sn} {channel}: {verdict}</b>  "
+                f"MIN={min_mv:.3f}mV  MAX={max_mv:.3f}mV  "
+                f"<span style='color:#888;'>(허용 {lower:.1f}~{upper:.1f}mV)</span>"
             )
         except Exception as e:
             self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED')
-            self.dmm_result_text.append(f'[V1] {sn} {channel}: 측정 오류 — {e}')
+            self.dmm_result_text.appendHtml(
+                f"<b style='color:#FF9800;'>[V1] {sn} {channel}: 측정 오류</b> — {e}")
         finally:
+            QApplication.restoreOverrideCursor()
             self.dmm_disp_mode.setText('DC Voltage')
             self.dmm_disp_trigger.setText('● Auto Trigger')
             self.dmm_disp_trigger.setStyleSheet(
@@ -978,11 +1245,13 @@ class MainWindow(QMainWindow):
         """Item 2: TOS Variation — 정밀 단발 1회 측정 (NPLC=10, AutoZero=ON), 범위 판정"""
         if not self._ensure_dmm_connected(sn):
             return
+        self.reset_dmm_accum_stats(silent=True)   # 소켓 명령 수신 시 자동 누적 리셋
         range_info = f'N=1 | NPLC=10  AutoZero=ON | 허용: {lower_mv:.1f}~{upper_mv:.1f} mV'
         self.dmm_disp_mode.setText('DC Voltage  │  CE TOS V2')
         self.dmm_disp_trigger.setText(f'● Measuring (Precision) — {sn} {channel}')
         self.dmm_disp_trigger.setStyleSheet(
             'color:#FFA726;font-size:13px;background:transparent;')
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         QApplication.processEvents()
         try:
             res      = self.dmm.measure_precision_voltage(nplc=10.0)
@@ -996,15 +1265,18 @@ class MainWindow(QMainWindow):
                 range_info=range_info, verdict=verdict
             )
             self.socket_server.send_analog_v2_result(sn, channel, passed, value_mv)
-            self.dmm_result_text.append(
-                f'[V2] {sn} {channel}: {verdict}  '
-                f'{value_mv:.4f}mV  (허용 {lower_mv:.1f}~{upper_mv:.1f}mV)  '
-                f'NPLC=10  {res["elapsed_ms"]:.0f}ms'
+            color = '#4CAF50' if passed else '#F44336'
+            self.dmm_result_text.appendHtml(
+                f"<b style='color:{color};'>[V2] {sn} {channel}: {verdict}</b>  "
+                f"{value_mv:.4f}mV  "
+                f"<span style='color:#888;'>(허용 {lower_mv:.1f}~{upper_mv:.1f}mV)  NPLC=10  {res['elapsed_ms']:.0f}ms</span>"
             )
         except Exception as e:
             self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED')
-            self.dmm_result_text.append(f'[V2] {sn} {channel}: 측정 오류 — {e}')
+            self.dmm_result_text.appendHtml(
+                f"<b style='color:#FF9800;'>[V2] {sn} {channel}: 측정 오류</b> — {e}")
         finally:
+            QApplication.restoreOverrideCursor()
             self.dmm_disp_mode.setText('DC Voltage')
             self.dmm_disp_trigger.setText('● Auto Trigger')
             self.dmm_disp_trigger.setStyleSheet(
@@ -1015,11 +1287,13 @@ class MainWindow(QMainWindow):
         """Item 3: 소비전류 — 정밀 단발 1회 측정 (NPLC=10, AutoZero=ON), 범위 판정"""
         if not self._ensure_dmm_connected(sn):
             return
+        self.reset_dmm_accum_stats(silent=True)   # 소켓 명령 수신 시 자동 누적 리셋
         range_info = f'N=1 | NPLC=10  AutoZero=ON | 허용: {lower_ma:.1f}~{upper_ma:.1f} mA'
         self.dmm_disp_mode.setText('DC Current  │  CE TOS I')
         self.dmm_disp_trigger.setText(f'● Measuring (Precision) — {sn} {channel}')
         self.dmm_disp_trigger.setStyleSheet(
             'color:#FFA726;font-size:13px;background:transparent;')
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         QApplication.processEvents()
         try:
             res      = self.dmm.measure_precision_current(nplc=10.0)
@@ -1033,15 +1307,18 @@ class MainWindow(QMainWindow):
                 range_info=range_info, verdict=verdict
             )
             self.socket_server.send_analog_i_result(sn, channel, passed, value_ma)
-            self.dmm_result_text.append(
-                f'[I]  {sn} {channel}: {verdict}  '
-                f'{value_ma:.4f}mA  (허용 {lower_ma:.1f}~{upper_ma:.1f}mA)  '
-                f'NPLC=10  {res["elapsed_ms"]:.0f}ms'
+            color = '#4CAF50' if passed else '#F44336'
+            self.dmm_result_text.appendHtml(
+                f"<b style='color:{color};'>[I]  {sn} {channel}: {verdict}</b>  "
+                f"{value_ma:.4f}mA  "
+                f"<span style='color:#888;'>(허용 {lower_ma:.1f}~{upper_ma:.1f}mA)  NPLC=10  {res['elapsed_ms']:.0f}ms</span>"
             )
         except Exception as e:
             self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED')
-            self.dmm_result_text.append(f'[I]  {sn} {channel}: 측정 오류 — {e}')
+            self.dmm_result_text.appendHtml(
+                f"<b style='color:#FF9800;'>[I]  {sn} {channel}: 측정 오류</b> — {e}")
         finally:
+            QApplication.restoreOverrideCursor()
             self.dmm_disp_mode.setText('DC Current')
             self.dmm_disp_trigger.setText('● Auto Trigger')
             self.dmm_disp_trigger.setStyleSheet(
@@ -1059,6 +1336,11 @@ class MainWindow(QMainWindow):
         if not visa_addr:
             return
         print(f'[DMM] 자동 연결 시도: {visa_addr}')
+        self.dmm_status_label.setText('Connecting...')
+        self.dmm_status_label.setStyleSheet('color:#FFA726;font-weight:bold;font-size:12px;')
+        self.dmm_led.setStyleSheet("background-color: #FFA726; border-radius: 6px; border: 1px solid #555;")
+        QApplication.processEvents()
+
         success, msg = self.dmm.connect(visa_addr)
         if success:
             self.dmm_connect_btn.setText('Disconnect')
@@ -1066,15 +1348,17 @@ class MainWindow(QMainWindow):
                 'QPushButton{background:#c62828;color:white;font-weight:bold;padding:5px;border-radius:4px;}'
                 'QPushButton:hover{background:#e53935;}'
                 'QPushButton:pressed{background:#8E0000;}')
-            self.dmm_status_label.setText(f'● {msg}')
+            self.dmm_status_label.setText(f'{msg}')
             self.dmm_status_label.setStyleSheet(
                 'color:#4CAF50;font-weight:bold;font-size:12px;')
+            self.dmm_led.setStyleSheet("background-color: #4CAF50; border-radius: 6px; border: 1px solid #555;")
             self.dmm_result_text.append(f'[DMM] 자동 연결됨: {msg}')
             self._set_dmm_action_buttons_enabled(True)   # 자동 연결 성공 → 버튼 활성화
         else:
-            self.dmm_status_label.setText('● Auto-connect Failed')
+            self.dmm_status_label.setText('Auto-connect Failed')
             self.dmm_status_label.setStyleSheet(
                 'color:#FF9800;font-weight:bold;font-size:12px;')
+            self.dmm_led.setStyleSheet("background-color: #FF9800; border-radius: 6px; border: 1px solid #555;")
             self.dmm_result_text.append(f'[DMM] 자동 연결 실패: {msg}')
 
     def toggle_connection(self):
@@ -1082,13 +1366,14 @@ class MainWindow(QMainWindow):
             # 연결 시도 중 즉시 UI 피드백 (블로킹 방지)
             self.connect_btn.setEnabled(False)
             self.connect_btn.setText("Connecting...")
+            self.scope_led.setStyleSheet("background-color: #FFA726; border-radius: 6px; border: 1px solid #555;")
             self.dev_info_label.setText("Device: Connecting...")
             self.dev_info_label.setStyleSheet("color: #FFA726; font-weight: bold;")
             QApplication.processEvents()
 
             success, model, serial = self.hw.open()
+            self.connect_btn.setEnabled(True)
             if success:
-                self.connect_btn.setEnabled(True)
                 self.connect_btn.setText("Disconnect Scope")
                 self.connect_btn.setStyleSheet(
                     "QPushButton { background-color: #f44336; color: white; font-weight: bold; padding: 10px; border-radius: 4px; }"
@@ -1096,14 +1381,15 @@ class MainWindow(QMainWindow):
                     "QPushButton:pressed { background-color: #B71C1C; }"
                     "QPushButton:disabled { background-color: #555; color: #888; }"
                 )
+                self.scope_led.setStyleSheet("background-color: #4CAF50; border-radius: 6px; border: 1px solid #555;")
                 self.dev_info_label.setText(f"Device: {model} (S/N: {serial})")
                 self.dev_info_label.setStyleSheet("color: green; font-weight: bold;")
                 self.start_btn.setEnabled(True)
                 self.monitor_btn.setEnabled(True)
                 self.apply_hardware_settings()
             else:
-                self.connect_btn.setEnabled(True)
                 self.connect_btn.setText("Connect Scope")
+                self.scope_led.setStyleSheet("background-color: #F44336; border-radius: 6px; border: 1px solid #555;")
                 self.dev_info_label.setText("Device: Connection Failed")
                 self.dev_info_label.setStyleSheet("color: red; font-weight: bold;")
         else:
@@ -1116,6 +1402,7 @@ class MainWindow(QMainWindow):
                 "QPushButton:pressed { background-color: #1565C0; }"
                 "QPushButton:disabled { background-color: #555; color: #888; }"
             )
+            self.scope_led.setStyleSheet("background-color: #888888; border-radius: 6px; border: 1px solid #555;")
             self.dev_info_label.setText("Device: Not Connected")
             self.dev_info_label.setStyleSheet("color: #aaa;")
             self.start_btn.setEnabled(False)
