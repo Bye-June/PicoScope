@@ -291,9 +291,18 @@ class MasterSocketServer(QObject):
             f'ANALOG_I_RESULT,{sn},{channel},{verdict},{value_ma:.3f}'
         )
 
-    def send_analog_error(self, sn: str, error_code: str):
-        """ANALOG_ERROR,SN,에러코드"""
-        self._send_raw(f'ANALOG_ERROR,{sn},{error_code}')
+    def send_analog_error(self, sn: str, error_code: str, detail: str = ''):
+        """ANALOG_ERROR,SN,에러코드[,상세내용]
+        
+        detail: SCPI 에러 문자열 등 추가 정보 (있을 때만 4번째 필드로 추가)
+        """
+        if detail:
+            # 쉼표가 포함될 수 있으므로 세미콜론으로 대체하여 파싱 혼선 방지
+            safe_detail = str(detail).replace(',', ';')
+            self._send_raw(f'ANALOG_ERROR,{sn},{error_code},{safe_detail}')
+        else:
+            self._send_raw(f'ANALOG_ERROR,{sn},{error_code}')
+
 
     # ------------------------------------------------------------------
     # 내부 전송 헬퍼

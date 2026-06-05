@@ -1225,7 +1225,7 @@ class MainWindow(QMainWindow):
                 f"<span style='color:#888;'>(허용 {lower:.1f}~{upper:.1f}mV)</span>"
             )
         except Exception as e:
-            self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED')
+            self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED', detail=str(e))
             self.dmm_result_text.append(
                 f"<b style='color:#FF9800;'>[V1] {sn} {channel}: 측정 오류</b> — {e}")
         finally:
@@ -1267,7 +1267,7 @@ class MainWindow(QMainWindow):
                 f"<span style='color:#888;'>(허용 {lower_mv:.1f}~{upper_mv:.1f}mV)  NPLC=10  {res['elapsed_ms']:.0f}ms</span>"
             )
         except Exception as e:
-            self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED')
+            self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED', detail=str(e))
             self.dmm_result_text.append(
                 f"<b style='color:#FF9800;'>[V2] {sn} {channel}: 측정 오류</b> — {e}")
         finally:
@@ -1309,7 +1309,7 @@ class MainWindow(QMainWindow):
                 f"<span style='color:#888;'>(허용 {lower_ma:.1f}~{upper_ma:.1f}mA)  NPLC=10  {res['elapsed_ms']:.0f}ms</span>"
             )
         except Exception as e:
-            self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED')
+            self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED', detail=str(e))
             self.dmm_result_text.append(
                 f"<b style='color:#FF9800;'>[I]  {sn} {channel}: 측정 오류</b> — {e}")
         finally:

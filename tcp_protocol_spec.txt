@@ -263,14 +263,19 @@ ANALOG_I_RESULT,SN-001,VCC_R,FAIL,21.534
 --------------------------------------------------
 측정 중 오류 발생 시 전송
 
-[패킷 구조 A — 측정 오류 (쉼표 구분, 총 3칸)]
-ANALOG_ERROR,SN,에러코드
+[패킷 구조 A — 측정 오류 (쉼표 구분, 총 3~4칸)]
+ANALOG_ERROR,SN,에러코드[,상세내용]
 
 에러코드:
   DMM_NOT_CONNECTED   — DMM 연결 안 됨
-  MEASUREMENT_FAILED  — 측정 실패 (DMM 응답 없음 등)
+  MEASUREMENT_FAILED  — 측정 실패 (DMM 응답 없음, SCPI 에러 등)
   UNKNOWN_CHANNEL     — 알 수 없는 채널명
   INVALID_COMMAND     — 명령 형식 오류 (파라미터 숫자 변환 실패 등)
+
+상세내용 (4번째 필드, 있을 때만 포함):
+  MEASUREMENT_FAILED 발생 시 DMM SCPI 에러 메시지를 그대로 전달합니다.
+  예: [DMM ERR] 정밀 DC 전류 측정 실패 — SCPI 에러: -261;"Data questionable"
+  ※ 쉼표(,)는 세미콜론(;)으로 치환하여 전송합니다.
 
 [패킷 구조 B — 명령 형식 오류 (쉼표 구분, 총 2칸)]
 ERROR,메시지
@@ -282,7 +287,8 @@ ERROR,메시지
 
 [송신 예시]
 ANALOG_ERROR,SN-001,DMM_NOT_CONNECTED
-ERROR,ANALOG_V1 requires 5 fields, got 4
+ANALOG_ERROR,SN-001,MEASUREMENT_FAILED,[DMM ERR] 정밀 DC 전류 측정 실패 — SCPI 에러: -261;"Data questionable"
+ERROR,ANALOG_V1 requires 5 fields; got 4
 
 
 --------------------------------------------------
