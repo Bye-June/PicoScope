@@ -534,6 +534,36 @@ class MainWindow(QMainWindow):
         mode_row.addWidget(self.dmm_btn_curr)
         m_vl.addLayout(mode_row)
 
+        # Range 선택
+        self._volt_ranges = [
+            ('100 mV', 0.1), ('1 V', 1.0), ('10 V', 10.0),
+            ('100 V', 100.0), ('1000 V', 1000.0)
+        ]
+        self._curr_ranges = [
+            ('100 µA', 0.0001), ('1 mA', 0.001), ('10 mA', 0.01),
+            ('100 mA', 0.1), ('1 A', 1.0), ('3 A', 3.0)
+        ]
+        range_row = QHBoxLayout()
+        range_lbl = QLabel('Range:')
+        range_lbl.setStyleSheet('color:#aaa;font-size:11px;min-width:46px;')
+        self.dmm_range_combo = QComboBox()
+        self.dmm_range_combo.setFixedHeight(26)
+        self.dmm_range_combo.setFixedWidth(120)
+        self.dmm_range_combo.setStyleSheet(
+            'QComboBox{background:#1e1e1e;color:#eee;border:1px solid #555;'
+            'border-radius:3px;padding:2px 8px;font-size:11px;}'
+            'QComboBox::drop-down{border:none;width:18px;}'
+            'QComboBox QAbstractItemView{background:#1e1e1e;color:#eee;'
+            'selection-background-color:#2979FF;}')
+        for label, _ in self._volt_ranges:
+            self.dmm_range_combo.addItem(label)
+        self.dmm_range_combo.setCurrentIndex(2)  # 기본: 10 V
+        range_row.addStretch()
+        range_row.addWidget(range_lbl)
+        range_row.addWidget(self.dmm_range_combo)
+        range_row.addStretch()
+        m_vl.addLayout(range_row)
+
         # 측정 실행 버튼
         btn_row = QHBoxLayout()
         self.dmm_single_btn = QPushButton('⚡  Single')
@@ -568,6 +598,7 @@ class MainWindow(QMainWindow):
         for btn in (self.dmm_btn_volt, self.dmm_btn_curr,
                     self.dmm_single_btn, self.dmm_1000_btn, self.dmm_reset_stats_btn):
             btn.setEnabled(False)
+        self.dmm_range_combo.setEnabled(False)
 
         meas_group.setLayout(m_vl)
         vl.addWidget(meas_group)
@@ -592,16 +623,26 @@ class MainWindow(QMainWindow):
             return  # 같은 모드면 무시
         self._dmm_mode = mode
         self.reset_dmm_accum_stats(silent=True)  # 모드 전환 시 누적값 초기화 (단위 혼잡 방지)
+        # Range 콤보박스 옵션 업데이트
+        self.dmm_range_combo.blockSignals(True)
+        self.dmm_range_combo.clear()
         if mode == 'VOLT':
+            for label, _ in self._volt_ranges:
+                self.dmm_range_combo.addItem(label)
+            self.dmm_range_combo.setCurrentIndex(2)   # 기본: 10 V
             self.dmm_btn_volt.setStyleSheet(self._dmm_mode_active_style)
             self.dmm_btn_curr.setStyleSheet(self._dmm_mode_inactive_style)
             self.dmm_disp_mode.setText('DC Voltage')
             self.dmm_disp_unit.setText('VDC')
         else:
+            for label, _ in self._curr_ranges:
+                self.dmm_range_combo.addItem(label)
+            self.dmm_range_combo.setCurrentIndex(3)   # 기본: 100 mA
             self.dmm_btn_volt.setStyleSheet(self._dmm_mode_inactive_style)
             self.dmm_btn_curr.setStyleSheet(self._dmm_mode_active_style)
             self.dmm_disp_mode.setText('DC Current')
             self.dmm_disp_unit.setText('ADC')
+        self.dmm_range_combo.blockSignals(False)
 
     def reset_dmm_accum_stats(self, silent=False):
         """DMM Single 누적 통계 데이터를 초기화하고 화면을 갱신합니다."""
@@ -889,7 +930,8 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         try:
             if self._dmm_mode == 'VOLT':
-                res  = self.dmm.measure_precision_voltage()
+                v_range = self._volt_ranges[self.dmm_range_combo.currentIndex()][1]
+                res  = self.dmm.measure_precision_voltage(v_range=v_range)
                 val  = res['value_v']
                 unit = 'VDC'
                 # 누적 통계에 추가
@@ -911,7 +953,8 @@ class MainWindow(QMainWindow):
                     f"<span style='color:#888;'>(NPLC={res['nplc']:.0f}  {res['elapsed_ms']:.0f}ms  N={n})</span>"
                 )
             else:
-                res  = self.dmm.measure_precision_current()
+                i_range = self._curr_ranges[self.dmm_range_combo.currentIndex()][1]
+                res  = self.dmm.measure_precision_current(i_range=i_range)
                 val  = res['value_a']
                 unit = 'ADC'
                 self.dmm_accum_values.append(val)
@@ -956,7 +999,8 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         try:
             if self._dmm_mode == 'VOLT':
-                res  = self.dmm.measure_dc_voltage(n_samples=1000, interval_us=50.0)
+                v_range = self._volt_ranges[self.dmm_range_combo.currentIndex()][1]
+                res  = self.dmm.measure_dc_voltage(n_samples=1000, interval_us=50.0, v_range=v_range)
                 val  = res['mean_v']
                 unit = 'VDC'
                 self._update_dmm_display(
@@ -973,7 +1017,8 @@ class MainWindow(QMainWindow):
                     f"std={res['std_v']*1000:.4f}  {res['elapsed_ms']:.0f}ms</span>"
                 )
             else:
-                res  = self.dmm.measure_dc_current(n_samples=1000, interval_us=1000.0)
+                i_range = self._curr_ranges[self.dmm_range_combo.currentIndex()][1]
+                res  = self.dmm.measure_dc_current(n_samples=1000, interval_us=1000.0, i_range=i_range)
                 val  = res['mean_a']
                 unit = 'ADC'
                 self._update_dmm_display(
@@ -1093,6 +1138,7 @@ class MainWindow(QMainWindow):
         for btn in (self.dmm_btn_volt, self.dmm_btn_curr,
                     self.dmm_single_btn, self.dmm_1000_btn, self.dmm_reset_stats_btn):
             btn.setEnabled(enabled)
+        self.dmm_range_combo.setEnabled(enabled)
 
     def toggle_dmm_connection(self):
         _STYLE_CONN = (

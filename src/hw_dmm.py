@@ -2,7 +2,11 @@
 hw_dmm.py — Keysight 34461A / 34465A VISA driver
   - pyvisa + Keysight IO Libraries Suite (visa32.dll) 백엔드 사용
   - 34461A: 최소 샘플링 간격 1000µs (1kS/s)
-  - 34465A: 최소 샘플링 간격 20µs  (50kS/s)
+  - 34465A + DIG 옵션: 최소 샘플링 간격 20µs (50kS/s), NPLC 0.0002 지원
+  - 34465A (DIG 없음): 최소 NPLC 0.02, 최소 샘플링 간격 ~500µs (SAMP:SOUR TIM 사용)
+
+  ※ DIG 옵션 여부는 connect() 시 *OPT? 쿼리로 자동 감지합니다.
+    DIG 없는 34465A에 0.02 미만 NPLC를 설정하면 -222 'Data out of range' 에러 발생.
 """
 
 import time
@@ -52,8 +56,10 @@ class DMMHardware:
         self.model = ''          # e.g. '34461A'
         self.serial = ''
         self.firmware = ''
+        self.has_dig = False     # DIG 옵션 (34465A/34470A 고속 샘플링 옵션)
         self._min_interval_us = self.DEFAULT_MIN_INTERVAL_US
         self._min_nplc        = self.DEFAULT_MIN_NPLC
+        self._valid_nplc      = list(self.DEFAULT_VALID_NPLC)  # 인스턴스별 유효 NPLC 목록
         self._cfg             = None   # 마지막으로 적용된 DMM 설정 캐시
 
     # ------------------------------------------------------------------
@@ -193,17 +199,43 @@ class DMMHardware:
             else:
                 self.model = idn
 
-            self._min_interval_us = self.MIN_INTERVAL_US.get(
-                self.model, self.DEFAULT_MIN_INTERVAL_US
-            )
-            self._min_nplc = self.MIN_NPLC.get(
-                self.model, self.DEFAULT_MIN_NPLC
-            )
+            # ── 34465A/34470A 샘플링 한계 설정 ──────────────────────────
+            # 실측 검증 결과 (MY64045156, FW A.03.03):
+            #   autozero OFF + fixed range + CALC:STAT OFF 조건에서
+            #   SAMP:TIM 50µs 정상 적용 확인 (SAMP:TIM? readback = 50.00µs)
+            #   NPLC 최솟값 = 0.001 (NPLC 0.0002는 이 펌웨어에서 미지원)
+            if self.model in ('34465A', '34470A'):
+                self._min_interval_us = 50.0   # autozero OFF 조건에서 달성 가능
+                self._min_nplc        = 0.001
+                self._valid_nplc      = [0.001, 0.002, 0.006, 0.02, 0.06,
+                                         0.2, 0.6, 1, 2, 6, 10, 20, 100]
+                print(f'[DMM] {self.model}: 최소 간격 50µs '
+                      f'(autozero OFF 필수, NPLC 최소 {self._min_nplc})')
+            else:
+                self._min_interval_us = self.MIN_INTERVAL_US.get(self.model, self.DEFAULT_MIN_INTERVAL_US)
+                self._min_nplc        = self.MIN_NPLC.get(self.model, self.DEFAULT_MIN_NPLC)
+                self._valid_nplc      = list(self.VALID_NPLC.get(self.model, self.DEFAULT_VALID_NPLC))
+            # 이전 세션 잔류 포맷 초기화 (REAL,64 바이너리가 남아있을 수 있음)
+            try:
+                self.inst.write('FORM:DATA ASC')
+            except Exception:
+                pass
+            self._cfg = None
 
             self.is_connected = True
-            msg = f'{self.model} (S/N: {self.serial}) 연결됨 | 최소 간격: {self._min_interval_us:.0f}µs'
+            if self.model in ('34465A', '34470A'):
+                msg = (f'{self.model} (S/N: {self.serial}) 연결됨'
+                       f' | 최소 간격: {self._min_interval_us:.0f}µs'
+                       f' | 측정 방식: APER 40µs (frequency-independent)')
+            else:
+                msg = (f'{self.model} (S/N: {self.serial}) 연결됨'
+                       f' | 최소 간격: {self._min_interval_us:.0f}µs'
+                       f' | 최소 NPLC: {self._min_nplc}')
             print(f'[DMM] {msg}')
             return True, msg
+
+
+
 
         except Exception as e:
             self.is_connected = False
@@ -285,9 +317,14 @@ class DMMHardware:
         """
         DC 전압을 n_samples 회 측정합니다.
 
+        고속 측정 조건 (34465A/34470A 50µs 달성에 필수):
+          - Fixed range (AUTO OFF)   : 레인지 탐색 오버헤드 제거
+          - Autozero OFF             : 샘플 간 zero 보정 측정 제거 (가장 큰 오버헤드)
+          - CALC:STAT OFF            : 내부 통계 계산 제거
+
         Args:
             n_samples:   측정 횟수 (34461A 최대 10000, 34465A 최대 2000000)
-            interval_us: 측정 간격 µs (34461A 최소 1000, 34465A 최소 20)
+            interval_us: 측정 간격 µs (34461A 최소 1000, 34465A 최소 50)
             v_range:     측정 레인지 V (10 = 10V 레인지)
 
         Returns:
@@ -307,55 +344,133 @@ class DMMHardware:
         actual_interval_us = self._clamp_interval(interval_us)
         interval_s = actual_interval_us / 1e6
 
-        # 유효 NPLC 리스트에서 interval에 맞는 가장 큰 NPLC 선택
-        # 조건: aperture(= NPLC / 60Hz) ≤ interval × 0.75  (25% 타이밍 여유)
-        valid_list = self.VALID_NPLC.get(self.model, self.DEFAULT_VALID_NPLC)
-        nplc = valid_list[0]  # 기본값: 최소 NPLC
-        for candidate in reversed(valid_list):   # 큰 값부터 확인
-            if candidate / 60.0 <= interval_s * 0.75:   # aperture ≤ 75% of interval
-                nplc = candidate
-                break
-        print(f'[DMM] measure_dc_voltage: interval={actual_interval_us:.0f}µs  '
-              f'NPLC={nplc}  model={self.model}')
+        # ── 34465A/34470A: NPLC 대신 APER(절대 시간)으로 설정 ──────────
+        # 근거: NPLC는 전원 주파수 의존, APER는 frequency-independent
+        # 검증: VOLT:DC:APER 40E-6 + SAMP:TIM 50E-6 → SAMP:TIM? readback 50µs 확인됨
+        use_tim = self.model in ('34465A', '34470A')
 
-        # 설정 캐시 확인
+        if use_tim:
+            # aperture = interval × 0.8 (20% 여유, 단 40µs 데이터시트 기준)
+            aper_us = min(interval_us * 0.8, 40.0)   # 데이터시트 최적: 40µs
+            aper_s  = aper_us / 1e6
+            print(f'[DMM] measure_dc_voltage: interval={actual_interval_us:.0f}µs  '
+                  f'APER={aper_us:.1f}µs  model={self.model}')
+        else:
+            # 34461A 등 구형: NPLC 방식 유지
+            valid_list = self._valid_nplc if self._valid_nplc else self.DEFAULT_VALID_NPLC
+            nplc = valid_list[0]
+            for candidate in reversed(valid_list):
+                if candidate / 60.0 <= interval_s * 0.75:
+                    nplc = candidate
+                    break
+            print(f'[DMM] measure_dc_voltage: interval={actual_interval_us:.0f}µs  '
+                  f'NPLC={nplc}  model={self.model}')
+
+        # 설정 캐시 키
         new_cfg = {
-            'mode': 'VOLT:DC', 'range': v_range, 'nplc': nplc,
-            'n': n_samples, 'samp': 'TIM' if self.model == '34465A' else 'IMM',
-            'interval': interval_s if self.model == '34465A' else None,
+            'mode': 'VOLT:DC', 'range': v_range,
+            'aper_us': aper_us if use_tim else None,
+            'nplc': None if use_tim else nplc,
+            'n': n_samples,
+            'samp': 'TIM' if use_tim else 'IMM',
+            'interval': interval_s if use_tim else None,
         }
         if self._cfg != new_cfg:
-            samp_cmds = (
-                ['SAMP:SOUR TIM', f'SAMP:TIM {interval_s:.6f}']
-                if self.model == '34465A'
-                else ['SAMP:SOUR IMM']
-            )
-            for cmd in ['*RST',
-                        f'CONF:VOLT:DC {v_range}',
-                        f'VOLT:DC:NPLC {nplc}',
-                        f'SAMP:COUN {n_samples}',
-                        *samp_cmds,
-                        'TRIG:SOUR IMM',
-                        'TRIG:COUN 1']:
-                self.inst.write(cmd)
+            if use_tim:
+                # ── 34465A/34470A 설정 (tos_test.py 레퍼런스 기준, PASS 22/22) ──
+                for cmd in [
+                    '*RST', '*CLS',
+                    f'CONF:VOLT:DC {v_range}',     # 모드 + range 초기 설정
+                    f'VOLT:DC:RANG {v_range}',      # range 명시적 재설정
+                    'VOLT:DC:RANG:AUTO OFF',         # auto range 명시적 비활성화
+                    'VOLT:DC:ZERO:AUTO OFF',         # autozero OFF (필수 — 없으면 528µs)
+                    f'VOLT:DC:APER {aper_s:.2e}',   # aperture 절대 시간 (NPLC 대신)
+                    'TRIG:SOUR BUS',                 # BUS trigger (버튼/소켓 → *TRG)
+                    'TRIG:DEL 0',                    # 트리거 지연 0 (즉시 측정 시작)
+                    'TRIG:COUN 1',
+                    'SAMP:SOUR TIM',
+                    f'SAMP:TIM {interval_s:.6f}',   # 50µs
+                    f'SAMP:COUN {n_samples}',
+                    'FORM:DATA REAL,64',             # Binary 64-bit IEEE 754
+                    'FORM:BORD SWAP',               # Little-endian (PC 기본)
+                ]:
+                    self.inst.write(cmd)
+
+                # SAMP:TIM readback 검증 ─────────────────────────────────
+                try:
+                    rb_us = float(self.inst.query('SAMP:TIM?').strip()) * 1e6
+                    diff  = abs(rb_us - actual_interval_us)
+                    if diff < 5.0:
+                        print(f'[DMM] SAMP:TIM readback = {rb_us:.1f}µs  ✓')
+                    else:
+                        print(f'[DMM] ⚠ SAMP:TIM readback = {rb_us:.1f}µs '
+                              f'(목표 {actual_interval_us:.0f}µs)  — 장비 최솟값 적용됨')
+                        actual_interval_us = rb_us
+                        interval_s = rb_us / 1e6
+                except Exception as e:
+                    print(f'[DMM] SAMP:TIM readback 실패: {e}')
+            else:
+                # 34461A 등 구형 모델
+                for cmd in [
+                    '*RST',
+                    f'CONF:VOLT:DC {v_range}',
+                    f'VOLT:DC:NPLC {nplc}',
+                    f'SAMP:COUN {n_samples}',
+                    'SAMP:SOUR IMM',
+                    'TRIG:SOUR IMM',
+                    'TRIG:COUN 1',
+                ]:
+                    self.inst.write(cmd)
+
             self._cfg = new_cfg
+
+        # ── 측정 실행 ─────────────────────────────────────────────────
+        wait_s = n_samples * interval_s + 5.0
+        self.inst.timeout = int(wait_s * 1000) + 5000
 
         self.inst.write('*CLS')
         t_start = time.perf_counter()
         self.inst.write('INIT')
-        self.inst.write('*WAI')
 
-        # 측정 완료 대기 (최대 n*interval + 5s)
-        wait_s = n_samples * interval_s + 5.0
-        self.inst.timeout = int(wait_s * 1000) + 5000
+        if use_tim:
+            # BUS trigger: 버튼/소켓 명령이 *TRG를 보내 측정 시작
+            # 실제 50µs 간격 측정은 34465A 내부 타이머가 수행
+            self.inst.write('*TRG')
 
-        raw = self.inst.query('FETC?')
-        elapsed_ms = (time.perf_counter() - t_start) * 1000
-        # 벌크 측정은 SCPI 에러 체크 제외:
-        # SAMP:SOUR TIM 등이 일부 DMM에서 -203 에러를 발생시켜도
-        # 측정값은 정상 반환하는 비치명적 에러임
+        self.inst.write('*WAI')  # 1000회 측정 완료까지 대기
 
-        values = np.array([float(v) for v in raw.strip().split(',')])
+        # DATA:POIN? — 실제 저장된 샘플 수 사전 확인
+        if use_tim:
+            try:
+                poin = int(float(self.inst.query('DATA:POIN?').strip()))
+                if poin != n_samples:
+                    print(f'[DMM] ⚠ DATA:POIN? = {poin}  (기대 {n_samples})')
+            except Exception:
+                pass
+
+        if use_tim:
+            # 바이너리 수신 — 34465A는 #0(Indefinite Length Block) 포맷으로 응답
+            # query_binary_values는 #0을 0 bytes로 파싱하므로 read_raw 직접 사용
+            # 검증: raw=8003B (#0 + 8000B float64 LE + \n) → 1000 doubles (PASS)
+            self.inst.write('FETC?')
+            raw_bytes = self.inst.read_raw()
+            elapsed_ms = (time.perf_counter() - t_start) * 1000
+            if raw_bytes[0:1] == b'#' and raw_bytes[1:2] == b'0':
+                # #0<data><\n>: 앞 2바이트(#0) + 끝 1바이트(\n) 제거
+                values = np.frombuffer(raw_bytes[2:-1], dtype='<f8')
+            elif raw_bytes[0:1] == b'#':
+                # #N<N자리 바이트수><data>: Definite Length Block
+                nd = int(raw_bytes[1:2])
+                nb = int(raw_bytes[2:2 + nd])
+                values = np.frombuffer(raw_bytes[2 + nd:2 + nd + nb], dtype='<f8')
+            else:
+                # ASCII fallback
+                values = np.array([float(v) for v in raw_bytes.decode('ascii', errors='replace').strip().split(',')])
+        else:
+            raw = self.inst.query('FETC?')
+            elapsed_ms = (time.perf_counter() - t_start) * 1000
+            values = np.array([float(v) for v in raw.strip().split(',')])
+
         self._check_overflow(values, 'DC 전압')
 
 
@@ -402,16 +517,19 @@ class DMMHardware:
         actual_interval_us = self._clamp_interval(interval_us)
         interval_s = actual_interval_us / 1e6
 
+        # SAMP:SOUR TIM 사용 여부
+        use_tim = self.model in ('34465A', '34470A')
+
         # 설정 캐시 확인
         new_cfg = {
             'mode': 'CURR:DC', 'range': i_range, 'nplc': 0.02,
-            'n': n_samples, 'samp': 'TIM' if self.model == '34465A' else 'IMM',
-            'interval': interval_s if self.model == '34465A' else None,
+            'n': n_samples, 'samp': 'TIM' if use_tim else 'IMM',
+            'interval': interval_s if use_tim else None,
         }
         if self._cfg != new_cfg:
             samp_cmds = (
                 ['SAMP:SOUR TIM', f'SAMP:TIM {interval_s:.6f}']
-                if self.model == '34465A'
+                if use_tim
                 else ['SAMP:SOUR IMM']
             )
             for cmd in ['*RST',
@@ -455,12 +573,18 @@ class DMMHardware:
     def measure_single_voltage(self, v_range: float = 10.0) -> float:
         """단일 DC 전압 즉시 측정 (MEAS:VOLT:DC? — 기기 기본값 사용)"""
         self._check_connected()
+        # MEAS 전 ASCII 포맷 명시 (이전 호출이 REAL,64 바이너리 모드로 끝났을 수 있음)
+        self.inst.write('FORM:DATA ASC')
+        self._cfg = None   # MEAS가 장비 모드를 변경하므로 캐시 무효화
         raw = self.inst.query(f'MEAS:VOLT:DC? {v_range}')
         return float(raw.strip())
 
     def measure_single_current(self, i_range: float = 0.1) -> float:
         """단일 DC 전류 즉시 측정 (MEAS:CURR:DC? — 기기 기본값 사용)"""
         self._check_connected()
+        # MEAS 전 ASCII 포맷 명시 (이전 호출이 REAL,64 바이너리 모드로 끝났을 수 있음)
+        self.inst.write('FORM:DATA ASC')
+        self._cfg = None   # MEAS가 장비 모드를 변경하므로 캐시 무효화
         raw = self.inst.query(f'MEAS:CURR:DC? {i_range}')
         return float(raw.strip())
 
@@ -491,7 +615,8 @@ class DMMHardware:
         # 설정 캐시 확인
         new_cfg = {'mode': 'VOLT:DC:PREC', 'range': v_range, 'nplc': nplc, 'n': 1}
         if self._cfg != new_cfg:
-            for cmd in [f'CONF:VOLT:DC {v_range}',
+            for cmd in ['FORM:DATA ASC',        # 바이너리 모드 잔류 방지
+                        f'CONF:VOLT:DC {v_range}',
                         f'VOLT:DC:NPLC {nplc}',
                         'VOLT:DC:ZERO:AUTO ON',
                         'TRIG:SOUR IMM',
@@ -541,7 +666,8 @@ class DMMHardware:
         # 설정 캐시 확인
         new_cfg = {'mode': 'CURR:DC:PREC', 'range': i_range, 'nplc': nplc, 'n': 1}
         if self._cfg != new_cfg:
-            for cmd in [f'CONF:CURR:DC {i_range}',
+            for cmd in ['FORM:DATA ASC',        # 바이너리 모드 잔류 방지
+                        f'CONF:CURR:DC {i_range}',
                         f'CURR:DC:NPLC {nplc}',
                         'CURR:DC:ZERO:AUTO ON',
                         'TRIG:SOUR IMM',
