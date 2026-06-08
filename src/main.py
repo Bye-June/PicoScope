@@ -546,9 +546,12 @@ class MainWindow(QMainWindow):
         range_row = QHBoxLayout()
         range_lbl = QLabel('Range:')
         range_lbl.setStyleSheet('color:#aaa;font-size:11px;min-width:46px;')
+        range_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.dmm_range_combo = QComboBox()
         self.dmm_range_combo.setFixedHeight(26)
-        self.dmm_range_combo.setFixedWidth(120)
+        self.dmm_range_combo.setEditable(True)
+        self.dmm_range_combo.lineEdit().setReadOnly(True)
+        self.dmm_range_combo.lineEdit().setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.dmm_range_combo.setStyleSheet(
             'QComboBox{background:#1e1e1e;color:#eee;border:1px solid #555;'
             'border-radius:3px;padding:2px 8px;font-size:11px;}'
@@ -558,10 +561,8 @@ class MainWindow(QMainWindow):
         for label, _ in self._volt_ranges:
             self.dmm_range_combo.addItem(label)
         self.dmm_range_combo.setCurrentIndex(2)  # 기본: 10 V
-        range_row.addStretch()
         range_row.addWidget(range_lbl)
         range_row.addWidget(self.dmm_range_combo)
-        range_row.addStretch()
         m_vl.addLayout(range_row)
 
         # 측정 실행 버튼
