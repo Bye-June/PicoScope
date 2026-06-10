@@ -6,14 +6,14 @@ socket_server.py — 마스터 VB6 ↔ PicoScope 프로그램 TCP 소켓 서버
   START,SN1,SN2,모드1,모드2,모드3             PicoScope 검사 시작
   CETOS_V1,SN,채널,기준mV,허용mV             TOS Output 전압 측정 (1000회)
   CETOS_V2,SN,채널,하한mV,상한mV             TOS Variation 단발 측정
-  CETOS_I,SN,채널,하한mA,상한mA              TOS 소비전류 단발 측정
+  CETOS_I,SN,하한mA,상한mA                  TOS/TAS 소비전류 단발 측정 (채널 없음)
 
 송신 응답 (프로그램 → 마스터):
   SELECT_ACK,<화면명>
   RESULT,SN1,판정,SN2,판정
   ANALOG_V1_RESULT,SN,채널,판정,MIN_mV,MAX_mV
   ANALOG_V2_RESULT,SN,채널,판정,측정값_mV
-  ANALOG_I_RESULT,SN,채널,판정,측정값_mA
+  ANALOG_I_RESULT,SN,판정,측정값_mA
   ANALOG_ERROR,SN,에러코드
   ERROR,메시지
 """
@@ -35,12 +35,11 @@ class MasterSocketServer(QObject):
     analog_v1_requested = pyqtSignal(str, str, float, float)
     # CE TOS Item 2: (sn, channel, lower_mv, upper_mv)
     analog_v2_requested = pyqtSignal(str, str, float, float)
-    # CE TOS Item 3: (sn, channel, lower_ma, upper_ma)
-    analog_i_requested = pyqtSignal(str, str, float, float)
+    # CE TOS/TAS Item 3: (sn, lower_ma, upper_ma)  ← 채널 없음
+    analog_i_requested = pyqtSignal(str, float, float)
 
-    VALID_SCREENS   = {'PICOSCOPE', '34465A'}
+    VALID_SCREENS    = {'PICOSCOPE', '34465A'}
     VALID_V_CHANNELS = {'TSM', 'TSS', 'TSM_R', 'TSS_R'}
-    VALID_I_CHANNELS = {'VCC_M', 'VCC_R'}
 
     # ------------------------------------------------------------------
     def __init__(self, port: int = 8080, parent=None):
@@ -229,28 +228,24 @@ class MasterSocketServer(QObject):
         self.analog_v2_requested.emit(sn, channel, lower_mv, upper_mv)
 
     # ------------------------------------------------------------------
-    # CETOS_I — TOS 소비전류 (단발 1회 측정, 범위 판정)
+    # ANALOG_I — 소비전류 단발 측정, 범위 판정 (채널 없음)
     # ------------------------------------------------------------------
     def _parse_analog_i(self, parts: list):
-        # CETOS_I,SN,채널,하한mA,상한mA   (총 5칸)
-        if len(parts) != 5:
+        # ANALOG_I,SN,하한mA,상한mA   (총 4칸, 채널 없음)
+        if len(parts) != 4:
             self._send_raw(
-                f'ERROR,ANALOG_I requires 5 fields, got {len(parts)}'
+                f'ERROR,ANALOG_I requires 4 fields, got {len(parts)}'
             )
             return
-        sn      = parts[1]
-        channel = parts[2].upper()
-        if channel not in self.VALID_I_CHANNELS:
-            self.send_analog_error(sn, 'UNKNOWN_CHANNEL')
-            return
+        sn = parts[1]
         try:
-            lower_ma = float(parts[3])
-            upper_ma = float(parts[4])
+            lower_ma = float(parts[2])
+            upper_ma = float(parts[3])
         except ValueError:
             self.send_analog_error(sn, 'INVALID_COMMAND')
             return
 
-        self.analog_i_requested.emit(sn, channel, lower_ma, upper_ma)
+        self.analog_i_requested.emit(sn, lower_ma, upper_ma)
 
     # ------------------------------------------------------------------
     # 응답 전송 메서드 (외부에서 슬롯으로 호출)
@@ -283,12 +278,12 @@ class MasterSocketServer(QObject):
             f'ANALOG_V2_RESULT,{sn},{channel},{verdict},{value_mv:.3f}'
         )
 
-    def send_analog_i_result(self, sn: str, channel: str,
+    def send_analog_i_result(self, sn: str,
                              passed: bool, value_ma: float):
-        """ANALOG_I_RESULT,SN,채널,PASS/FAIL,측정값_mA"""
+        """ANALOG_I_RESULT,SN,PASS/FAIL,측정값_mA  (채널 없음)"""
         verdict = 'PASS' if passed else 'FAIL'
         self._send_raw(
-            f'ANALOG_I_RESULT,{sn},{channel},{verdict},{value_ma:.3f}'
+            f'ANALOG_I_RESULT,{sn},{verdict},{value_ma:.3f}'
         )
 
     def send_analog_error(self, sn: str, error_code: str, detail: str = ''):

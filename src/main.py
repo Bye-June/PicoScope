@@ -1327,15 +1327,15 @@ class MainWindow(QMainWindow):
             self.dmm_disp_trigger.setStyleSheet(
                 'color:#66BB6A;font-size:13px;background:transparent;')
 
-    def on_analog_i_requested(self, sn: str, channel: str,
+    def on_analog_i_requested(self, sn: str,
                              lower_ma: float, upper_ma: float):
         """Item 3: 소비전류 — 정밀 단발 1회 측정 (NPLC=10, AutoZero=ON), 범위 판정"""
         if not self._ensure_dmm_connected(sn):
             return
         self.reset_dmm_accum_stats(silent=True)   # 소켓 명령 수신 시 자동 누적 리셋
         range_info = f'N=1 | NPLC=10  AutoZero=ON | 허용: {lower_ma:.1f}~{upper_ma:.1f} mA'
-        self.dmm_disp_mode.setText('DC Current  │  CE TOS I')
-        self.dmm_disp_trigger.setText(f'● Measuring (Precision) — {sn} {channel}')
+        self.dmm_disp_mode.setText('DC Current  │  Consumption I')
+        self.dmm_disp_trigger.setText(f'● Measuring (Precision) — {sn}')
         self.dmm_disp_trigger.setStyleSheet(
             'color:#FFA726;font-size:13px;background:transparent;')
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -1351,23 +1351,21 @@ class MainWindow(QMainWindow):
                 value_a, 'ADC',
                 range_info=range_info, verdict=verdict
             )
-            self.socket_server.send_analog_i_result(sn, channel, passed, value_ma)
+            self.socket_server.send_analog_i_result(sn, passed, value_ma)
             color = '#4CAF50' if passed else '#F44336'
             self.dmm_result_text.append(
-                f"<b style='color:{color};'>[I]  {sn} {channel}: {verdict}</b>  "
+                f"<b style='color:{color};'>[I]  {sn}: {verdict}</b>  "
                 f"{value_ma:.4f}mA  "
                 f"<span style='color:#888;'>(허용 {lower_ma:.1f}~{upper_ma:.1f}mA)  NPLC=10  {res['elapsed_ms']:.0f}ms</span>"
             )
         except Exception as e:
             self.socket_server.send_analog_error(sn, 'MEASUREMENT_FAILED', detail=str(e))
             self.dmm_result_text.append(
-                f"<b style='color:#FF9800;'>[I]  {sn} {channel}: 측정 오류</b> — {e}")
+                f"<b style='color:#FF9800;'>[I]  {sn}: 측정 오류</b> — {e}")
         finally:
             QApplication.restoreOverrideCursor()
             self.dmm_disp_mode.setText('DC Current')
             self.dmm_disp_trigger.setText('● Auto Trigger')
-            self.dmm_disp_trigger.setStyleSheet(
-                'color:#66BB6A;font-size:13px;background:transparent;')
 
 
     def auto_connect_on_startup(self):

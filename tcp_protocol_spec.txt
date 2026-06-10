@@ -173,19 +173,21 @@ ANALOG_V2,SN-001,TSS,0,7
   DMM 단발 측정 1회 (MEAS:CURR:DC?) — 반복 측정 없음
   측정값 그 자체를 범위와 비교하여 판정
 
-[패킷 구조 (쉼표 구분, 총 5칸)]
-ANALOG_I,SN,채널,하한_mA,상한_mA
+[패킷 구조 (쉼표 구분, 총 4칸)]
+ANALOG_I,SN,하한_mA,상한_mA
 
 자리(Index) | 항목명        | 설명 및 허용 값
 [0]         | 명령어        | "ANALOG_I" 고정
 [1]         | S/N           | 제품 바코드/시리얼 넘버
-[2]         | 채널          | VCC_M | VCC_R
-[3]         | 하한_mA       | 허용 최솟값 (통상 0)
-[4]         | 상한_mA       | 허용 최댓값 (통상 20)
+[2]         | 하한_mA       | 허용 최솟값 (통상 0)
+[3]         | 상한_mA       | 허용 최댓값 (통상 20)
+
+* 채널 없음 — 마스터가 하드웨어 스위칭 후 해당 라인 연결 완료, 이후 명령 전송
+* CE TOS (VCC_M, VCC_R) 및 TAS (Power A/B) 동일 명령어 사용
 
 [수신 예시]
-VCC_M 소비전류 측정 (0~20mA 범위):
-ANALOG_I,SN-001,VCC_M,0,20
+소비전류 측정 (0~20mA 범위):
+ANALOG_I,SN-001,0,20
 
 
 --------------------------------------------------
@@ -240,22 +242,21 @@ ANALOG_V2_RESULT,SN-001,TSM_R,FAIL,8.521
 --------------------------------------------------
 5-6. Item 3 측정 결과 (프로그램 → 마스터)
 --------------------------------------------------
-[패킷 구조 (쉼표 구분, 총 5칸)]
-ANALOG_I_RESULT,SN,채널,판정,측정값_mA
+[패킷 구조 (쉼표 구분, 총 4칸)]
+ANALOG_I_RESULT,SN,판정,측정값_mA
 
 자리(Index) | 항목명        | 설명
 [0]         | 명령어        | "ANALOG_I_RESULT" 고정
 [1]         | S/N           | 수신받은 제품 S/N
-[2]         | 채널          | VCC_M | VCC_R
-[3]         | 판정          | "PASS" 또는 "FAIL"
-[4]         | 측정값_mA     | 단발 측정값 (소수점 3자리, mA 단위)
+[2]         | 판정          | "PASS" 또는 "FAIL"
+[3]         | 측정값_mA     | 단발 측정값 (소수점 3자리, mA 단위)
 
 [송신 예시]
-VCC_M 결과 (15.312mA, 합격):
-ANALOG_I_RESULT,SN-001,VCC_M,PASS,15.312
+소비전류 결과 (15.312mA, 합격):
+ANALOG_I_RESULT,SN-001,PASS,15.312
 
-VCC_R 결과 (21.534mA, 불합격):
-ANALOG_I_RESULT,SN-001,VCC_R,FAIL,21.534
+소비전류 결과 (21.534mA, 불합격):
+ANALOG_I_RESULT,SN-001,FAIL,21.534
 
 
 --------------------------------------------------
@@ -329,11 +330,11 @@ P→M: ANALOG_V2_RESULT,SN-001,TSS_R,PASS,5.334
   |TSM_R측정값 - TSS_R측정값| = |6.011 - 5.334| = 0.677mV < 7mV → PASS
 
 [Item 3: 소비전류 — DMM 직렬 연결, 단발 측정 판정]
-M→P: ANALOG_I,SN-001,VCC_M,0,20
-P→M: ANALOG_I_RESULT,SN-001,VCC_M,PASS,15.312
+M→P: ANALOG_I,SN-001,0,20
+P→M: ANALOG_I_RESULT,SN-001,PASS,15.312
 
-M→P: ANALOG_I,SN-001,VCC_R,0,20
-P→M: ANALOG_I_RESULT,SN-001,VCC_R,PASS,14.876
+M→P: ANALOG_I,SN-001,0,20
+P→M: ANALOG_I_RESULT,SN-001,PASS,14.876
 
 
 
