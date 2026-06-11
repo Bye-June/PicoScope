@@ -3,14 +3,14 @@ socket_server.py — 마스터 VB6 ↔ PicoScope 프로그램 TCP 소켓 서버
 
 수신 명령 (마스터 → 프로그램):
   SELECT,<화면명>                             화면 전환 (PICOSCOPE | 34465A)
-  START,SN1,SN2,모드1,모드2,모드3             PicoScope 검사 시작
+  START,SN,모드1,모드2,모드3                         PicoScope 검사 시작
   CETOS_V1,SN,채널,기준mV,허용mV             TOS Output 전압 측정 (1000회)
   CETOS_V2,SN,채널,하한mV,상한mV             TOS Variation 단발 측정
   CETOS_I,SN,하한mA,상한mA                  TOS/TAS 소비전류 단발 측정 (채널 없음)
 
 송신 응답 (프로그램 → 마스터):
   SELECT_ACK,<화면명>
-  RESULT,SN1,판정,SN2,판정
+  RESULT,SN,판정[,신호명,UT_us,err%,...]
   ANALOG_V1_RESULT,SN,채널,판정,MIN_mV,MAX_mV
   ANALOG_V2_RESULT,SN,채널,판정,측정값_mV
   ANALOG_I_RESULT,SN,판정,측정값_mA
@@ -137,23 +137,21 @@ class MasterSocketServer(QObject):
     # START — PicoScope 검사
     # ------------------------------------------------------------------
     def _parse_start(self, parts: list):
-        # START,SN1,SN2,모드1,모드2,모드3   (총 6칸)
+        # START,SN,모드1,모드2,모드3   (총 5칸, 단일 제품)
         # 모드 형식:
         #   SENT/TSM, SENT/TSS         → SENT 채널, 신호명 TSM/TSS
         #   SPC/1/3, SPC/1, SPC/3     → SPC, ID 목록
         #   Analog, 빈값              → 아날로그 / 미사용
-        if len(parts) != 6:
+        if len(parts) != 5:
             self._send_raw(
-                f'ERROR,START requires 6 fields, got {len(parts)}'
+                f'ERROR,START requires 5 fields, got {len(parts)}'
             )
             return
 
-        sns       = [parts[1], parts[2]]
-        mode_pin1 = parts[3]
-        mode_pin2 = parts[4]
-        mode_pin3 = parts[5]
-
-        ch_triplets = [('A', 'B', 'C'), ('D', 'E', 'F')]
+        sn        = parts[1]
+        mode_pin1 = parts[2]
+        mode_pin2 = parts[3]
+        mode_pin3 = parts[4]
 
         def parse_mode(mode_str: str):
             """(mode_string, signal_name) 반환.
@@ -173,25 +171,24 @@ class MasterSocketServer(QObject):
                 return 'SENT', signal
             return mode_str, ''
 
-        products = []
-        for i in range(2):
-            sn = sns[i]
-            if sn:
-                ch1, ch2, ch3 = ch_triplets[i]
-                m1, s1 = parse_mode(mode_pin1)
-                m2, s2 = parse_mode(mode_pin2)
-                m3, s3 = parse_mode(mode_pin3)
-                channels = {}
-                signals  = {}
-                if m1: channels[ch1] = m1;  signals[ch1] = s1
-                if m2: channels[ch2] = m2;  signals[ch2] = s2
-                if m3: channels[ch3] = m3;  signals[ch3] = s3
-                products.append({'sn': sn, 'channels': channels, 'signals': signals})
-
-        if not products:
-            self._send_raw('ERROR,No valid products/channels provided')
+        if not sn:
+            self._send_raw('ERROR,No valid SN provided')
             return
 
+        m1, s1 = parse_mode(mode_pin1)
+        m2, s2 = parse_mode(mode_pin2)
+        m3, s3 = parse_mode(mode_pin3)
+        channels = {}
+        signals  = {}
+        if m1: channels['A'] = m1;  signals['A'] = s1
+        if m2: channels['B'] = m2;  signals['B'] = s2
+        if m3: channels['C'] = m3;  signals['C'] = s3
+
+        if not channels:
+            self._send_raw('ERROR,No valid channels provided')
+            return
+
+        products = [{'sn': sn, 'channels': channels, 'signals': signals}]
         self.start_test_requested.emit(products)
 
     # ------------------------------------------------------------------
