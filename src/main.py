@@ -1267,9 +1267,7 @@ class MainWindow(QMainWindow):
                 values=result['values'],
                 limits=(lower, upper)
             )
-            self.socket_server.send_analog_v1_result(sn, channel, passed, min_mv, max_mv)
-
-            # ── CSV 저장 (1000회 / 50µs 단위) ─────────────────────────
+            # ── CSV 저장 (1000회 / 50µs 단위) — 소켓 응답 이전 ──────
             try:
                 import numpy as _np
                 _ts   = QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')
@@ -1287,6 +1285,8 @@ class MainWindow(QMainWindow):
                 print(f'[CSV] {os.path.basename(_csv_path)}')
             except Exception as _ce:
                 print(f'[CSV] V1 저장 실패: {_ce}')
+
+            self.socket_server.send_analog_v1_result(sn, channel, passed, min_mv, max_mv)
 
             color = '#4CAF50' if passed else '#F44336'
             self.dmm_result_text.append(
