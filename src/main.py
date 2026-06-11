@@ -1627,8 +1627,8 @@ class MainWindow(QMainWindow):
             timestamp = QDateTime.currentDateTime().toString("yyyyMMdd_HHmmss")
             today     = QDateTime.currentDateTime().toString("yyyyMMdd")
             base_dir  = _BASE_DIR
-            csv_dir   = os.path.join(base_dir, "results", "csv",   today)
-            img_dir   = os.path.join(base_dir, "results", "image", today)
+            csv_dir   = os.path.join(base_dir, "results", today, "csv")
+            img_dir   = os.path.join(base_dir, "results", today, "image")
             os.makedirs(csv_dir, exist_ok=True)
             os.makedirs(img_dir, exist_ok=True)
 
