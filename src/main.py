@@ -1651,20 +1651,44 @@ class MainWindow(QMainWindow):
                       f"  trim=[{t_start}:{t_end}]")
                 return t_us, v_trim
 
-            def _save_channel_png(t_us, v_trim, label, png_path):
-                """트리밍 파형을 개별 PNG로 저장."""
+            # 채널 → 색상 매핑 (pyqtgraph 채널 색상과 동일)
+            _CH_COLOR = {
+                'A': '#2196F3',   # Blue
+                'B': '#F44336',   # Red
+                'C': '#4CAF50',   # Green
+                'D': '#FFC107',   # Yellow
+                'E': '#9C27B0',   # Purple
+                'F': '#9E9E9E',   # Grey
+            }
+
+            def _save_channel_png(t_us, v_trim, label, png_path, ch='A'):
+                """트리밍 파형을 다크 테마 PNG로 저장 (Waveform Monitor 스타일)."""
                 import matplotlib
                 matplotlib.use('Agg')
                 import matplotlib.pyplot as _plt
-                fig, ax = _plt.subplots(figsize=(10, 3))
-                ax.plot(t_us, v_trim, linewidth=0.8, color='#4EA8DE')
-                ax.set_title(label, fontsize=11, fontweight='bold')
-                ax.set_xlabel('Time (µs)')
-                ax.set_ylabel('Voltage (V)')
+
+                BG     = '#000000'
+                GRID   = '#2a2a2a'
+                color  = _CH_COLOR.get(ch, '#4EA8DE')
+
+                fig, ax = _plt.subplots(figsize=(12, 3.5))
+                fig.patch.set_facecolor(BG)
+                ax.set_facecolor(BG)
+
+                ax.plot(t_us, v_trim, linewidth=0.8, color=color)
+
+                ax.set_title(label, fontsize=11, fontweight='bold', color='white', pad=6)
+                ax.set_xlabel('Time (µs)', color='white', fontsize=9)
+                ax.set_ylabel('Voltage (V)', color='white', fontsize=9)
                 ax.set_xlim(t_us[0], t_us[-1])
-                ax.grid(True, alpha=0.3)
-                fig.tight_layout()
-                fig.savefig(png_path, dpi=150)
+
+                ax.tick_params(colors='white', labelsize=8)
+                for spine in ax.spines.values():
+                    spine.set_edgecolor('#444444')
+                ax.grid(True, color=GRID, linewidth=0.6, linestyle='-')
+
+                fig.tight_layout(pad=0.8)
+                fig.savefig(png_path, dpi=150, facecolor=BG)
                 _plt.close(fig)
                 print(f"[PNG] {os.path.basename(png_path)}")
 
@@ -1707,7 +1731,8 @@ class MainWindow(QMainWindow):
                                         saved_csvs.append(csv_path)
                                         png_path = csv_path.replace('.csv', '.png')
                                         _save_channel_png(trim_data[0], trim_data[1],
-                                                          f"{sn}  {pin_name}  ({id_key})", png_path)
+                                                          f"{sn}  {pin_name}  ({id_key})",
+                                                          png_path, ch=ch)
                             else:
                                 # SENT / Analog: Sync 구간 트리밍 저장
                                 # {SN}_{signal}_{ts}.csv  (예: SN001_TSM_20260611_104933.csv)
@@ -1723,7 +1748,8 @@ class MainWindow(QMainWindow):
                                     saved_csvs.append(csv_path)
                                     png_path = csv_path.replace('.csv', '.png')
                                     _save_channel_png(trim_data[0], trim_data[1],
-                                                      f"{sn}  {file_label}  (SENT)", png_path)
+                                                      f"{sn}  {file_label}  (SENT)",
+                                                      png_path, ch=ch)
                 else:
                     # 수동 검사: 전 채널 풀 캡처 저장
                     active_chs = sorted(capture_data.keys())
