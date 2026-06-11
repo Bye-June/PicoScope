@@ -1633,12 +1633,12 @@ class MainWindow(QMainWindow):
             sr = self.hw.sample_rate_hz if self.hw.sample_rate_hz > 0 else 10e6
 
             def _save_trimmed(v_full, t_start, t_end, csv_path):
-                """트리밍 구간을 CSV로 저장. 성공 시 True 반환."""
+                """트리밍 구간을 CSV로 저장. 성공 시 (t_us, v_trim) 반환, 실패 시 None."""
                 total_n = len(v_full)
-                t_end = min(int(t_end), total_n)
+                t_end   = min(int(t_end), total_n)
                 t_start = max(int(t_start), 0)
                 if t_start >= t_end:
-                    return False
+                    return None
                 v_trim = v_full[t_start:t_end]
                 n_trim = len(v_trim)
                 t_us   = np.arange(n_trim) / sr * 1e6
@@ -1649,7 +1649,24 @@ class MainWindow(QMainWindow):
                 dur_us = n_trim / sr * 1e6
                 print(f"[CSV] {os.path.basename(csv_path)}  n={n_trim}  {dur_us:.1f}µs"
                       f"  trim=[{t_start}:{t_end}]")
-                return True
+                return t_us, v_trim
+
+            def _save_channel_png(t_us, v_trim, label, png_path):
+                """트리밍 파형을 개별 PNG로 저장."""
+                import matplotlib
+                matplotlib.use('Agg')
+                import matplotlib.pyplot as _plt
+                fig, ax = _plt.subplots(figsize=(10, 3))
+                ax.plot(t_us, v_trim, linewidth=0.8, color='#4EA8DE')
+                ax.set_title(label, fontsize=11, fontweight='bold')
+                ax.set_xlabel('Time (µs)')
+                ax.set_ylabel('Voltage (V)')
+                ax.set_xlim(t_us[0], t_us[-1])
+                ax.grid(True, alpha=0.3)
+                fig.tight_layout()
+                fig.savefig(png_path, dpi=150)
+                _plt.close(fig)
+                print(f"[PNG] {os.path.basename(png_path)}")
 
             saved_csvs = []
             if capture_data:
@@ -1685,8 +1702,12 @@ class MainWindow(QMainWindow):
                                     id_num   = id_key.replace('ID', '')
                                     pin_name = SPC_ID_PIN.get(id_num, f"SAS{id_num}")
                                     csv_path = os.path.join(save_dir, f"{sn}_{pin_name}_{timestamp}.csv")
-                                    if _save_trimmed(v_full, t_s, t_e, csv_path):
+                                    trim_data = _save_trimmed(v_full, t_s, t_e, csv_path)
+                                    if trim_data:
                                         saved_csvs.append(csv_path)
+                                        png_path = csv_path.replace('.csv', '.png')
+                                        _save_channel_png(trim_data[0], trim_data[1],
+                                                          f"{sn}  {pin_name}  ({id_key})", png_path)
                             else:
                                 # SENT / Analog: Sync 구간 트리밍 저장
                                 # {SN}_{signal}_{ts}.csv  (예: SN001_TSM_20260611_104933.csv)
@@ -1697,8 +1718,12 @@ class MainWindow(QMainWindow):
                                     continue
                                 file_label = signal if signal else f"Ch{ch}"
                                 csv_path = os.path.join(save_dir, f"{sn}_{file_label}_{timestamp}.csv")
-                                if _save_trimmed(v_full, t_s, t_e, csv_path):
+                                trim_data = _save_trimmed(v_full, t_s, t_e, csv_path)
+                                if trim_data:
                                     saved_csvs.append(csv_path)
+                                    png_path = csv_path.replace('.csv', '.png')
+                                    _save_channel_png(trim_data[0], trim_data[1],
+                                                      f"{sn}  {file_label}  (SENT)", png_path)
                 else:
                     # 수동 검사: 전 채널 풀 캡처 저장
                     active_chs = sorted(capture_data.keys())
