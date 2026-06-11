@@ -158,9 +158,8 @@ class SENTDecoder:
             "crc_expected":    crc_expected,
             "crc_valid":       crc_valid,
             # CSV 저장용 트리밍 범위 (샘플 인덱스)
-            # trim_start : SYNC 펄스 하강 엣지 (프레임 시작)
-            # trim_end   : SYNC 주기 끝(edges[sync_index+1]) + 3UT 마진
-            #              판정은 UT(Sync 주기/56)만 사용 → Sync 구간으로 충분
+            # trim_start : SYNC 펄스 하강 엣지 (주기 시작)
+            # trim_end   : 다음 SYNC 펄스 하강 엣지 (주기 종료) → 판정에 사용된 구간과 정확히 일치
             "trim_start": int(edges[sync_index]),
-            "trim_end":   int(edges[sync_index + 1]) + int(actual_ut_us * 3.0 / self.sample_time_us),
+            "trim_end":   int(edges[sync_index + 1]),
         }
