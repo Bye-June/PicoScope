@@ -1613,9 +1613,9 @@ class MainWindow(QMainWindow):
                 
             QApplication.processEvents() # Ensure plot is drawn
             
-            # --- Save Raw Data CSV (채널별 트리밍 저장) ---
-            # SENT  : SYNC 하강 엣지 ~ CRC 니블 끝 + 30UT 마진 (~650µs)
-            # SPC   : 첫 트리거 하강 엣지 ~ 마지막 응답 프레임 끝 (~1.8ms)
+            # --- Save Raw Data CSV ---
+            # SENT  : Sync 구간만 (~177µs)  → {SN}_{ts}_Ch{X}_raw.csv
+            # SPC   : ID별 파일 분리, Sync 확보된 ID만 저장 → {SN}_{ts}_Ch{X}_ID1_raw.csv
             # 수동   : 전 채널 풀 캡처 저장
             timestamp = QDateTime.currentDateTime().toString("yyyyMMdd_HHmmss")
             base_dir = _BASE_DIR
@@ -1625,40 +1625,64 @@ class MainWindow(QMainWindow):
             capture_data = self.sequencer.last_capture
             sr = self.hw.sample_rate_hz if self.hw.sample_rate_hz > 0 else 10e6
 
+            def _save_trimmed(v_full, t_start, t_end, csv_path):
+                """트리밍 구간을 CSV로 저장. 성공 시 True 반환."""
+                total_n = len(v_full)
+                t_end = min(int(t_end), total_n)
+                t_start = max(int(t_start), 0)
+                if t_start >= t_end:
+                    return False
+                v_trim = v_full[t_start:t_end]
+                n_trim = len(v_trim)
+                t_us   = np.arange(n_trim) / sr * 1e6
+                matrix = np.column_stack([t_us, v_trim])
+                header = f'time_us,{os.path.basename(csv_path).split("_raw")[0]}_V'
+                np.savetxt(csv_path, matrix, delimiter=',',
+                           header=header, comments='', fmt='%.6f')
+                dur_us = n_trim / sr * 1e6
+                print(f"[CSV] {os.path.basename(csv_path)}  n={n_trim}  {dur_us:.1f}µs"
+                      f"  trim=[{t_start}:{t_end}]")
+                return True
+
             saved_csvs = []
             if capture_data:
                 if products:
-                    # 소켓 검사: 제품별 채널별 트리밍 CSV
                     for prod in products:
                         sn = prod['sn']
                         prod_chs = sorted(prod['channels'].keys())
                         prod_chs = [ch for ch in prod_chs if ch in capture_data]
 
                         for ch in prod_chs:
-                            v_full = capture_data[ch]
-                            total_n = len(v_full)
+                            v_full  = capture_data[ch]
+                            ch_res  = results.get(ch, {})
+                            mode    = test_config.get(ch, {}).get('mode', '')
 
-                            # 채널 결과에서 트리밍 인덱스 획득
-                            ch_res = results.get(ch, {})
-                            t_start = int(ch_res.get('trim_start', 0))
-                            t_end   = int(ch_res.get('trim_end',   total_n))
-                            t_end   = min(t_end, total_n)
-                            if t_start >= t_end:          # 디코더 실패 시 풀 저장
-                                t_start, t_end = 0, total_n
-
-                            v_trim = v_full[t_start:t_end]
-                            n_trim = len(v_trim)
-                            t_us   = np.arange(n_trim) / sr * 1e6
-
-                            matrix = np.column_stack([t_us, v_trim])
-                            header = f'time_us,Ch{ch}_V'
-                            csv_path = os.path.join(save_dir, f"{sn}_{timestamp}_Ch{ch}_raw.csv")
-                            np.savetxt(csv_path, matrix, delimiter=',',
-                                       header=header, comments='', fmt='%.6f')
-                            saved_csvs.append(csv_path)
-                            dur_us = n_trim / sr * 1e6
-                            print(f"[CSV] {csv_path}  n={n_trim}  dur={dur_us:.1f}µs"
-                                  f"  trim=[{t_start}:{t_end}]")
+                            if mode.upper().startswith('SPC'):
+                                # SPC: ID별 파일 분리 저장
+                                # Sync 미확보 ID는 저장 안 함 (trim_start/trim_end 없음)
+                                for id_key, id_res in ch_res.get('details', {}).items():
+                                    t_s = id_res.get('trim_start')
+                                    t_e = id_res.get('trim_end')
+                                    if t_s is None or t_e is None:
+                                        # Sync 미확보 → 저장 안 함
+                                        # ※ 진단 필요 시 아래 주석 해제하여 _NOSYNC.csv 저장 가능
+                                        # nosync_path = os.path.join(save_dir, f"{sn}_{timestamp}_Ch{ch}_{id_key}_NOSYNC.csv")
+                                        # _save_trimmed(v_full, 0, min(len(v_full), 2000), nosync_path)
+                                        print(f"[CSV] {id_key} Sync 미확보 → 저장 건너뜀")
+                                        continue
+                                    csv_path = os.path.join(save_dir, f"{sn}_{timestamp}_Ch{ch}_{id_key}_raw.csv")
+                                    if _save_trimmed(v_full, t_s, t_e, csv_path):
+                                        saved_csvs.append(csv_path)
+                            else:
+                                # SENT / Analog: Sync 구간 트리밍 저장
+                                t_s = ch_res.get('trim_start')
+                                t_e = ch_res.get('trim_end')
+                                if t_s is None or t_e is None:
+                                    print(f"[CSV] Ch{ch} 트리밍 정보 없음 → 저장 건너뜀")
+                                    continue
+                                csv_path = os.path.join(save_dir, f"{sn}_{timestamp}_Ch{ch}_raw.csv")
+                                if _save_trimmed(v_full, t_s, t_e, csv_path):
+                                    saved_csvs.append(csv_path)
                 else:
                     # 수동 검사: 전 채널 풀 캡처 저장
                     active_chs = sorted(capture_data.keys())
