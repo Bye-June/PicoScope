@@ -1614,9 +1614,10 @@ class MainWindow(QMainWindow):
             QApplication.processEvents() # Ensure plot is drawn
             
             # --- Save Raw Data CSV ---
-            # SENT  : Sync 구간만 (~177µs)  → {SN}_{ts}_Ch{X}_raw.csv
-            # SPC   : ID별 파일 분리, Sync 확보된 ID만 저장 → {SN}_{ts}_Ch{X}_ID1_raw.csv
-            # 수동   : 전 채널 풀 캡처 저장
+            # SPC ID → 핀 네이밍 매핑
+            # ID1 → SAS2, ID3 → SAS1  (하드웨어 핀 정의 기준)
+            SPC_ID_PIN = {'1': 'SAS2', '3': 'SAS1'}
+
             timestamp = QDateTime.currentDateTime().toString("yyyyMMdd_HHmmss")
             base_dir = _BASE_DIR
             save_dir = os.path.join(base_dir, "results", QDateTime.currentDateTime().toString("yyyyMMdd"))
@@ -1636,7 +1637,7 @@ class MainWindow(QMainWindow):
                 n_trim = len(v_trim)
                 t_us   = np.arange(n_trim) / sr * 1e6
                 matrix = np.column_stack([t_us, v_trim])
-                header = f'time_us,{os.path.basename(csv_path).split("_raw")[0]}_V'
+                header = f'time_us,{os.path.basename(csv_path).split("_")[1]}_V'
                 np.savetxt(csv_path, matrix, delimiter=',',
                            header=header, comments='', fmt='%.6f')
                 dur_us = n_trim / sr * 1e6
@@ -1661,8 +1662,8 @@ class MainWindow(QMainWindow):
 
                             if mode.upper().startswith('SPC'):
                                 # SPC: ID별 파일 분리 저장
-                                # ID1 → {SN}_{ts}_SAS1.csv
-                                # ID3 → {SN}_{ts}_SAS3.csv
+                                # ID1 → {SN}_SAS2_{ts}.csv
+                                # ID3 → {SN}_SAS1_{ts}.csv
                                 # Sync 미확보 ID는 저장 안 함
                                 for id_key, id_res in ch_res.get('details', {}).items():
                                     t_s = id_res.get('trim_start')
@@ -1673,22 +1674,22 @@ class MainWindow(QMainWindow):
                                         # _save_trimmed(v_full, 0, min(len(v_full), 2000), nosync)
                                         print(f"[CSV] {id_key} Sync 미확보 → 저장 건너뜀")
                                         continue
-                                    # id_key: "ID1" → id_num: "1"
-                                    id_num = id_key.replace('ID', '')
-                                    file_label = f"SAS{id_num}"
-                                    csv_path = os.path.join(save_dir, f"{sn}_{timestamp}_{file_label}.csv")
+                                    # id_key: "ID1"→"1", "ID3"→"3" → 핀 네이밍으로 변환
+                                    id_num   = id_key.replace('ID', '')
+                                    pin_name = SPC_ID_PIN.get(id_num, f"SAS{id_num}")
+                                    csv_path = os.path.join(save_dir, f"{sn}_{pin_name}_{timestamp}.csv")
                                     if _save_trimmed(v_full, t_s, t_e, csv_path):
                                         saved_csvs.append(csv_path)
                             else:
                                 # SENT / Analog: Sync 구간 트리밍 저장
-                                # {SN}_{ts}_{signal}.csv  (예: SN001_20260611_TSM.csv)
+                                # {SN}_{signal}_{ts}.csv  (예: SN001_TSM_20260611_104933.csv)
                                 t_s = ch_res.get('trim_start')
                                 t_e = ch_res.get('trim_end')
                                 if t_s is None or t_e is None:
                                     print(f"[CSV] Ch{ch} 트리밍 정보 없음 → 저장 건너뜀")
                                     continue
                                 file_label = signal if signal else f"Ch{ch}"
-                                csv_path = os.path.join(save_dir, f"{sn}_{timestamp}_{file_label}.csv")
+                                csv_path = os.path.join(save_dir, f"{sn}_{file_label}_{timestamp}.csv")
                                 if _save_trimmed(v_full, t_s, t_e, csv_path):
                                     saved_csvs.append(csv_path)
                 else:
@@ -1704,7 +1705,7 @@ class MainWindow(QMainWindow):
                             v = np.pad(v, (0, n - len(v)), constant_values=np.nan)
                         cols.append(v[:n])
                     matrix = np.column_stack(cols)
-                    csv_path = os.path.join(save_dir, f"MANUAL_{timestamp}_raw.csv")
+                    csv_path = os.path.join(save_dir, f"MANUAL_{timestamp}.csv")
                     np.savetxt(csv_path, matrix, delimiter=',',
                                header=header, comments='', fmt='%.6f')
                     saved_csvs.append(csv_path)
