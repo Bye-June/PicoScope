@@ -1625,9 +1625,12 @@ class MainWindow(QMainWindow):
             SPC_ID_PIN = {'1': 'SAS2', '3': 'SAS1'}
 
             timestamp = QDateTime.currentDateTime().toString("yyyyMMdd_HHmmss")
-            base_dir = _BASE_DIR
-            save_dir = os.path.join(base_dir, "results", QDateTime.currentDateTime().toString("yyyyMMdd"))
-            os.makedirs(save_dir, exist_ok=True)
+            today     = QDateTime.currentDateTime().toString("yyyyMMdd")
+            base_dir  = _BASE_DIR
+            csv_dir   = os.path.join(base_dir, "results", "csv",   today)
+            img_dir   = os.path.join(base_dir, "results", "image", today)
+            os.makedirs(csv_dir, exist_ok=True)
+            os.makedirs(img_dir, exist_ok=True)
 
             capture_data = self.sequencer.last_capture
             sr = self.hw.sample_rate_hz if self.hw.sample_rate_hz > 0 else 10e6
@@ -1725,11 +1728,12 @@ class MainWindow(QMainWindow):
                                     # id_key: "ID1"→"1", "ID3"→"3" → 핀 네이밍으로 변환
                                     id_num   = id_key.replace('ID', '')
                                     pin_name = SPC_ID_PIN.get(id_num, f"SAS{id_num}")
-                                    csv_path = os.path.join(save_dir, f"{sn}_{pin_name}_{timestamp}.csv")
+                                    csv_path = os.path.join(csv_dir, f"{sn}_{pin_name}_{timestamp}.csv")
                                     trim_data = _save_trimmed(v_full, t_s, t_e, csv_path)
                                     if trim_data:
                                         saved_csvs.append(csv_path)
-                                        png_path = csv_path.replace('.csv', '.png')
+                                        png_path = os.path.join(img_dir,
+                                                                 f"{sn}_{pin_name}_{timestamp}.png")
                                         _save_channel_png(trim_data[0], trim_data[1],
                                                           f"{sn}  {pin_name}  ({id_key})",
                                                           png_path, ch=ch)
@@ -1742,11 +1746,12 @@ class MainWindow(QMainWindow):
                                     print(f"[CSV] Ch{ch} 트리밍 정보 없음 → 저장 건너뜀")
                                     continue
                                 file_label = signal if signal else f"Ch{ch}"
-                                csv_path = os.path.join(save_dir, f"{sn}_{file_label}_{timestamp}.csv")
+                                csv_path = os.path.join(csv_dir, f"{sn}_{file_label}_{timestamp}.csv")
                                 trim_data = _save_trimmed(v_full, t_s, t_e, csv_path)
                                 if trim_data:
                                     saved_csvs.append(csv_path)
-                                    png_path = csv_path.replace('.csv', '.png')
+                                    png_path = os.path.join(img_dir,
+                                                             f"{sn}_{file_label}_{timestamp}.png")
                                     _save_channel_png(trim_data[0], trim_data[1],
                                                       f"{sn}  {file_label}  (SENT)",
                                                       png_path, ch=ch)
@@ -1763,7 +1768,7 @@ class MainWindow(QMainWindow):
                             v = np.pad(v, (0, n - len(v)), constant_values=np.nan)
                         cols.append(v[:n])
                     matrix = np.column_stack(cols)
-                    csv_path = os.path.join(save_dir, f"MANUAL_{timestamp}.csv")
+                    csv_path = os.path.join(csv_dir, f"MANUAL_{timestamp}.csv")
                     np.savetxt(csv_path, matrix, delimiter=',',
                                header=header, comments='', fmt='%.6f')
                     saved_csvs.append(csv_path)
@@ -1773,9 +1778,9 @@ class MainWindow(QMainWindow):
             if capture_data:
                 if products:
                     sn_label = '_'.join(p['sn'] for p in products)
-                    img_path = os.path.join(save_dir, f"{sn_label}_{timestamp}_waveform.png")
+                    img_path = os.path.join(img_dir, f"{sn_label}_{timestamp}_waveform.png")
                 else:
-                    img_path = os.path.join(save_dir, f"MANUAL_{timestamp}_waveform.png")
+                    img_path = os.path.join(img_dir, f"MANUAL_{timestamp}_waveform.png")
                 pixmap = self.plot_widget.grab()
                 pixmap.save(img_path, 'PNG')
                 print(f"[IMG] saved: {img_path}")

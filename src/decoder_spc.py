@@ -20,9 +20,9 @@ import numpy as np
 
 # 판정 기준 (TAS 규격)
 UT_NOM_US      = 2.75          # SPC nominal UT
-UT_TOL_RATIO   = 0.05          # ±5%
-UT_MIN_US      = UT_NOM_US * (1 - UT_TOL_RATIO)   # 2.6125
-UT_MAX_US      = UT_NOM_US * (1 + UT_TOL_RATIO)   # 2.8875
+UT_TOL_RATIO   = 0.03          # ±3%  (문서: SENT SPC Unit Time 측정 방법_260609)
+UT_MIN_US      = UT_NOM_US * (1 - UT_TOL_RATIO)   # 2.6675
+UT_MAX_US      = UT_NOM_US * (1 + UT_TOL_RATIO)   # 2.8325
 
 # AWG 트리거 펄스 규격
 TRIGGER_SPEC = {
