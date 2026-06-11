@@ -1267,22 +1267,43 @@ class MainWindow(QMainWindow):
                 values=result['values'],
                 limits=(lower, upper)
             )
-            # ── CSV 저장 (1000회 / 50µs 단위) — 소켓 응답 이전 ──────
+            # ── CSV 저장 (1000회 / 50µs, SN별 단일 파일에 채널 컬럼 추가) ──
             try:
-                import numpy as _np
-                _ts   = QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')
-                _today = QDateTime.currentDateTime().toString('yyyyMMdd')
-                _csv_dir = os.path.join(_BASE_DIR, 'results', _today, 'csv')
+                import numpy as _np, csv as _csv
+                _today    = QDateTime.currentDateTime().toString('yyyyMMdd')
+                _csv_dir  = os.path.join(_BASE_DIR, 'results', _today, 'csv')
                 os.makedirs(_csv_dir, exist_ok=True)
-                _csv_path = os.path.join(
-                    _csv_dir, f'{sn}_{channel}_{_ts}_V1.csv')
-                _t_us = _np.arange(result['n_samples']) * result['interval_us']
-                _vals_mv = result['values'] * 1000.0
-                _matrix = _np.column_stack([_t_us, _vals_mv])
-                _np.savetxt(_csv_path, _matrix, delimiter=',',
-                            header='time_us,' + channel + '_mV',
-                            fmt='%.3f', comments='')
-                print(f'[CSV] {os.path.basename(_csv_path)}')
+                _csv_path = os.path.join(_csv_dir, f'{sn}_{_today}_V1.csv')
+                _t_us     = _np.arange(result['n_samples']) * result['interval_us']
+                _vals_mv  = result['values'] * 1000.0
+                _col_name = channel + '_mV'
+
+                if os.path.isfile(_csv_path):
+                    # 기존 파일에 컬럼 추가 (또는 같은 채널 덮어쓰기)
+                    with open(_csv_path, 'r', newline='') as _f:
+                        _reader = _csv.reader(_f)
+                        _header = next(_reader)
+                        _rows   = list(_reader)
+                    if _col_name in _header:
+                        _ci = _header.index(_col_name)
+                        for _i, _row in enumerate(_rows):
+                            if _i < len(_vals_mv):
+                                _row[_ci] = f'{_vals_mv[_i]:.3f}'
+                    else:
+                        _header.append(_col_name)
+                        for _i, _row in enumerate(_rows):
+                            _row.append(f'{_vals_mv[_i]:.3f}' if _i < len(_vals_mv) else '')
+                    with open(_csv_path, 'w', newline='') as _f:
+                        _writer = _csv.writer(_f)
+                        _writer.writerow(_header)
+                        _writer.writerows(_rows)
+                else:
+                    # 신규 파일: time_us + 첫 채널
+                    _matrix = _np.column_stack([_t_us, _vals_mv])
+                    _np.savetxt(_csv_path, _matrix, delimiter=',',
+                                header='time_us,' + _col_name,
+                                fmt='%.3f', comments='')
+                print(f'[CSV] {os.path.basename(_csv_path)}  [{_col_name}]')
             except Exception as _ce:
                 print(f'[CSV] V1 저장 실패: {_ce}')
 
