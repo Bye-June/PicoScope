@@ -1268,6 +1268,26 @@ class MainWindow(QMainWindow):
                 limits=(lower, upper)
             )
             self.socket_server.send_analog_v1_result(sn, channel, passed, min_mv, max_mv)
+
+            # ── CSV 저장 (1000회 / 50µs 단위) ─────────────────────────
+            try:
+                import numpy as _np
+                _ts   = QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')
+                _today = QDateTime.currentDateTime().toString('yyyyMMdd')
+                _csv_dir = os.path.join(_BASE_DIR, 'results', _today, 'csv')
+                os.makedirs(_csv_dir, exist_ok=True)
+                _csv_path = os.path.join(
+                    _csv_dir, f'{sn}_{channel}_{_ts}_V1.csv')
+                _t_us = _np.arange(result['n_samples']) * result['interval_us']
+                _vals_mv = result['values'] * 1000.0
+                _matrix = _np.column_stack([_t_us, _vals_mv])
+                _np.savetxt(_csv_path, _matrix, delimiter=',',
+                            header='time_us,' + channel + '_mV',
+                            fmt='%.3f', comments='')
+                print(f'[CSV] {os.path.basename(_csv_path)}')
+            except Exception as _ce:
+                print(f'[CSV] V1 저장 실패: {_ce}')
+
             color = '#4CAF50' if passed else '#F44336'
             self.dmm_result_text.append(
                 f"<b style='color:{color};'>[V1] {sn} {channel}: {verdict}</b>  "
