@@ -1614,8 +1614,14 @@ class MainWindow(QMainWindow):
             QApplication.processEvents() # Ensure plot is drawn
             
             # --- Save Raw Data CSV ---
-            # SPC ID → 핀 네이밍 매핑
-            # ID1 → SAS2, ID3 → SAS1  (하드웨어 핀 정의 기준)
+            # 채널 → 신호명 고정 매핑 (하드웨어 배선 기준, 스펙 변경 불필요)
+            # 핀1 (A/D) → TSM,  핀2 (B/E) → TSS,  핀3 (C/F) → SPC (ID별 SAS1/SAS2)
+            CH_SIGNAL_MAP = {
+                'A': 'TSM', 'D': 'TSM',
+                'B': 'TSS', 'E': 'TSS',
+            }
+            # SPC ID → 핀 네이밍 매핑 (하드웨어 핀 정의 기준)
+            # ID1 → SAS2, ID3 → SAS1
             SPC_ID_PIN = {'1': 'SAS2', '3': 'SAS1'}
 
             timestamp = QDateTime.currentDateTime().toString("yyyyMMdd_HHmmss")
@@ -1649,8 +1655,7 @@ class MainWindow(QMainWindow):
             if capture_data:
                 if products:
                     for prod in products:
-                        sn      = prod['sn']
-                        signals = prod.get('signals', {})   # {ch: 'TSM'|'TSS'|'SPC'|''}
+                        sn       = prod['sn']
                         prod_chs = sorted(prod['channels'].keys())
                         prod_chs = [ch for ch in prod_chs if ch in capture_data]
 
@@ -1658,7 +1663,9 @@ class MainWindow(QMainWindow):
                             v_full  = capture_data[ch]
                             ch_res  = results.get(ch, {})
                             mode    = test_config.get(ch, {}).get('mode', '')
-                            signal  = signals.get(ch, '')   # 예: 'TSM', 'TSS', 'SPC', ''
+                            # 신호명: 고정 배선 매핑 우선, 없으면 소켓 signals fallback
+                            signals = prod.get('signals', {})
+                            signal  = CH_SIGNAL_MAP.get(ch) or signals.get(ch, f'Ch{ch}')
 
                             if mode.upper().startswith('SPC'):
                                 # SPC: ID별 파일 분리 저장
