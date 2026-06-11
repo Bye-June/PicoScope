@@ -157,4 +157,11 @@ class SENTDecoder:
             "crc_nibble":      crc_nibble,
             "crc_expected":    crc_expected,
             "crc_valid":       crc_valid,
+            # CSV 저장용 트리밍 범위 (샘플 인덱스)
+            # trim_start : SYNC 펄스 하강 엣지 (프레임 시작)
+            # trim_end   : CRC 니블 하강 엣지 + 30 UT 마진 (프레임 끝)
+            "trim_start": int(edges[sync_index]),
+            "trim_end":   (int(edges[sync_index + 9]) + int(actual_ut_us * 30.0 / self.sample_time_us)
+                           if sync_index + 9 < len(edges)
+                           else int(edges[-1])),
         }

@@ -1613,7 +1613,10 @@ class MainWindow(QMainWindow):
                 
             QApplication.processEvents() # Ensure plot is drawn
             
-            # --- Save Raw Data CSV ---
+            # --- Save Raw Data CSV (채널별 트리밍 저장) ---
+            # SENT  : SYNC 하강 엣지 ~ CRC 니블 끝 + 30UT 마진 (~650µs)
+            # SPC   : 첫 트리거 하강 엣지 ~ 마지막 응답 프레임 끝 (~1.8ms)
+            # 수동   : 전 채널 풀 캡처 저장
             timestamp = QDateTime.currentDateTime().toString("yyyyMMdd_HHmmss")
             base_dir = _BASE_DIR
             save_dir = os.path.join(base_dir, "results", QDateTime.currentDateTime().toString("yyyyMMdd"))
@@ -1624,33 +1627,43 @@ class MainWindow(QMainWindow):
 
             saved_csvs = []
             if capture_data:
-                active_chs = sorted(capture_data.keys())
-                n = max(len(capture_data[ch]) for ch in active_chs)
-                t_us = np.arange(n) / sr * 1e6
-
                 if products:
-                    # 제품별 해당 채널만 저장
+                    # 소켓 검사: 제품별 채널별 트리밍 CSV
                     for prod in products:
                         sn = prod['sn']
                         prod_chs = sorted(prod['channels'].keys())
                         prod_chs = [ch for ch in prod_chs if ch in capture_data]
 
-                        header = 'time_us,' + ','.join(f'Ch{ch}_V' for ch in prod_chs)
-                        cols = [t_us]
                         for ch in prod_chs:
-                            v = capture_data[ch]
-                            if len(v) < n:
-                                v = np.pad(v, (0, n - len(v)), constant_values=np.nan)
-                            cols.append(v[:n])
-                        matrix = np.column_stack(cols)
+                            v_full = capture_data[ch]
+                            total_n = len(v_full)
 
-                        csv_path = os.path.join(save_dir, f"{sn}_{timestamp}_raw.csv")
-                        np.savetxt(csv_path, matrix, delimiter=',',
-                                   header=header, comments='', fmt='%.4f')
-                        saved_csvs.append(csv_path)
-                        print(f"[CSV] saved: {csv_path}  channels={prod_chs}")
+                            # 채널 결과에서 트리밍 인덱스 획득
+                            ch_res = results.get(ch, {})
+                            t_start = int(ch_res.get('trim_start', 0))
+                            t_end   = int(ch_res.get('trim_end',   total_n))
+                            t_end   = min(t_end, total_n)
+                            if t_start >= t_end:          # 디코더 실패 시 풀 저장
+                                t_start, t_end = 0, total_n
+
+                            v_trim = v_full[t_start:t_end]
+                            n_trim = len(v_trim)
+                            t_us   = np.arange(n_trim) / sr * 1e6
+
+                            matrix = np.column_stack([t_us, v_trim])
+                            header = f'time_us,Ch{ch}_V'
+                            csv_path = os.path.join(save_dir, f"{sn}_{timestamp}_Ch{ch}_raw.csv")
+                            np.savetxt(csv_path, matrix, delimiter=',',
+                                       header=header, comments='', fmt='%.6f')
+                            saved_csvs.append(csv_path)
+                            dur_us = n_trim / sr * 1e6
+                            print(f"[CSV] {csv_path}  n={n_trim}  dur={dur_us:.1f}µs"
+                                  f"  trim=[{t_start}:{t_end}]")
                 else:
-                    # 수동 검사: 전 채널 저장
+                    # 수동 검사: 전 채널 풀 캡처 저장
+                    active_chs = sorted(capture_data.keys())
+                    n = max(len(capture_data[ch]) for ch in active_chs)
+                    t_us = np.arange(n) / sr * 1e6
                     header = 'time_us,' + ','.join(f'Ch{ch}_V' for ch in active_chs)
                     cols = [t_us]
                     for ch in active_chs:
@@ -1659,10 +1672,9 @@ class MainWindow(QMainWindow):
                             v = np.pad(v, (0, n - len(v)), constant_values=np.nan)
                         cols.append(v[:n])
                     matrix = np.column_stack(cols)
-
                     csv_path = os.path.join(save_dir, f"MANUAL_{timestamp}_raw.csv")
                     np.savetxt(csv_path, matrix, delimiter=',',
-                               header=header, comments='', fmt='%.4f')
+                               header=header, comments='', fmt='%.6f')
                     saved_csvs.append(csv_path)
                     print(f"[CSV] saved: {csv_path}")
 

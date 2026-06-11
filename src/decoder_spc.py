@@ -66,8 +66,9 @@ class SPCDecoder:
     def _find_sync(self, fe, re, start_idx):
         """
         start_idx 이후에서 Sync 펄스(≈ 56×UT)를 찾는다.
-        Sync 후보: 연속 두 falling edge 사이 간격이 SYNC_TICKS×UT_NOM ±20% 인 것.
-        반환: (sync_period_us, ut_us) 또는 None
+        반환: (sync_period_us, ut_us, sync_start_sample, sync_end_sample) 또는 None
+        sync_start_sample : Sync 페리어 시작 하강 엣지의 절대 샘플 인덱스
+        sync_end_sample   : Sync 페리어 종료(다음 하강 엣지)의 절대 샘플 인덱스
         """
         response_fe = fe[fe >= start_idx]
         if len(response_fe) < 2:
@@ -81,7 +82,7 @@ class SPCDecoder:
         for i, p in enumerate(periods_us):
             if sync_min <= p <= sync_max:
                 ut = p / SYNC_TICKS
-                return float(p), float(ut)
+                return float(p), float(ut), int(response_fe[i]), int(response_fe[i + 1])
 
         return None
 
@@ -105,8 +106,10 @@ class SPCDecoder:
         fe, re = self._find_edges(voltage_array, threshold)
         pulses = self._build_pulses(fe, re)
 
-        results   = {}
-        all_pass  = True
+        results       = {}
+        all_pass      = True
+        frame_start   = None   # 첫 트리거 하강 엣지 (절대 샘플 인덱스)
+        frame_end     = 0      # 마지막 응답 프레임 끝  (절대 샘플 인덱스)
 
         for spc_id in sorted(requested_ids):
             spec = TRIGGER_SPEC.get(spc_id)
@@ -136,6 +139,10 @@ class SPCDecoder:
 
             trig_start, trig_end, trig_width = trig_found
 
+            # 첫 트리거 시작 추적
+            if frame_start is None:
+                frame_start = trig_start
+
             # 2) 트리거 이후 첫 Sync 탐색
             sync_result = self._find_sync(fe, re, trig_end)
 
@@ -148,7 +155,13 @@ class SPCDecoder:
                 all_pass = False
                 continue
 
-            sync_period_us, measured_ut_us = sync_result
+            sync_period_us, measured_ut_us, sync_start_smp, sync_end_smp = sync_result
+
+            # 응답 프레임 끝 = sync_end + 8 니블 최대 폭 (28 UT)
+            max_nibble_smp = int(28 * measured_ut_us / self.sample_us)
+            response_end = sync_end_smp + 8 * max_nibble_smp
+            if response_end > frame_end:
+                frame_end = response_end
 
             # 3) UT 범위 판정
             ut_pass = (UT_MIN_US <= measured_ut_us <= UT_MAX_US)
@@ -175,7 +188,12 @@ class SPCDecoder:
             results[f"ID{spc_id}"] = result
 
         return {
-            "pass"   : all_pass,
-            "status" : "success" if all_pass else "error",
-            "details": results,
+            "pass"       : all_pass,
+            "status"     : "success" if all_pass else "error",
+            "details"    : results,
+            # CSV 저장용 트리밍 범위
+            # trim_start : 첫 트리거 하강 엣지 (ID1 트리거 시작)
+            # trim_end   : 마지막 ID 응답 프레임 끝 (sync_end + 8 × 28UT)
+            "trim_start" : frame_start if frame_start is not None else 0,
+            "trim_end"   : frame_end,
         }
