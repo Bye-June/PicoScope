@@ -1882,30 +1882,50 @@ class MainWindow(QMainWindow):
                     result_parts.append(sn)
                     result_parts.append(prod_label)
 
-                # [3]~ UT 상세 데이터: 신호명,UT_us,err%  순서로 반복
-                # 순서: TSM → TSS → SAS1 → SAS2
-                _sig_order = ['TSM', 'TSS', 'SAS1', 'SAS2']
+                # UT 상세: 고정 슬롯 (TSM→TSS→SAS1→SAS2, 항상 4신호×3필드=12필드)
+                # Sync 미확보 시 신호명은 유지, UT/err만 빈 문자열
+                # → 전체 필드 수 항상 15칸 고정 (RESULT,SN,판정 + 12필드)
+                _ut_map = {}   # {signal_name: (ut_us, err_pct) or None}
                 for prod in products:
-                    _chs = prod['channels']
+                    _chs     = prod['channels']
                     _signals = prod.get('signals', {})
                     for _ch, _mode in sorted(_chs.items()):
                         _r = results.get(_ch, {})
                         if _mode.upper().startswith('SPC'):
-                            for _id_k, _id_r in sorted(_r.get('details', {}).items()):
-                                _id_num  = _id_k.replace('ID', '')
-                                _pin     = SPC_ID_PIN.get(_id_num, f'SAS{_id_num}')
-                                _ut      = _id_r.get('measured_ut_us', 0)
-                                _ep      = _id_r.get('ut_error_pct', 0)
-                                result_parts += [_pin, f'{_ut:.4f}', f'{_ep:+.2f}']
-                        elif 'measured_ut_us' in _r:   # SENT
+                            for _id_k, _id_r in _r.get('details', {}).items():
+                                _id_num = _id_k.replace('ID', '')
+                                _pin    = SPC_ID_PIN.get(_id_num, f'SAS{_id_num}')
+                                if _id_r.get('trim_start') is not None:
+                                    _ut_map[_pin] = (
+                                        _id_r.get('measured_ut_us', 0),
+                                        _id_r.get('ut_error_pct', 0)
+                                    )
+                                else:
+                                    _ut_map[_pin] = None   # Sync 미확보
+                        elif _mode.upper().startswith('SENT'):
                             _sig = (CH_SIGNAL_MAP.get(_ch)
                                     or _signals.get(_ch, f'Ch{_ch}')
                                     or f'Ch{_ch}')
-                            _ut  = _r['measured_ut_us']
-                            _ep  = (_ut - 3.0) / 3.0 * 100
-                            result_parts += [_sig, f'{_ut:.4f}', f'{_ep:+.2f}']
+                            if 'measured_ut_us' in _r:
+                                _ut = _r['measured_ut_us']
+                                _ep = (_ut - 3.0) / 3.0 * 100
+                                _ut_map[_sig] = (_ut, _ep)
+                            else:
+                                _ut_map[_sig] = None       # Sync 미확보
+
+                # 고정 순서로 출력 (사용하지 않는 신호 슬롯은 제외)
+                _sig_order = ['TSM', 'TSS', 'SAS1', 'SAS2']
+                for _sig in _sig_order:
+                    if _sig not in _ut_map:
+                        continue   # 해당 신호 미사용 모드 → 슬롯 자체 없음
+                    val = _ut_map[_sig]
+                    if val is not None:
+                        result_parts += [_sig, f'{val[0]:.4f}', f'{val[1]:+.2f}']
+                    else:
+                        result_parts += [_sig, '', '']    # Sync 미확보 → 빈 문자열
 
                 self.socket_server.send_result(','.join(result_parts))
+
 
 
 
