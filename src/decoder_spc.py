@@ -155,6 +155,7 @@ class SPCDecoder:
             ut_pass = (UT_MIN_US <= measured_ut_us <= UT_MAX_US)
 
             # CSV 저장용 트리밍 범위 — 판정에 사용된 폴링→폴링 구간으로만 저장
+            sync_margin = int(UT_NOM_US * 3.0 / self.sample_us)
             result = {
                 "pass"            : ut_pass,
                 "status"          : "success" if ut_pass else "error",
@@ -166,7 +167,8 @@ class SPCDecoder:
                 "ut_nom_us"       : UT_NOM_US,
                 "ut_error_pct"    : round((measured_ut_us - UT_NOM_US) / UT_NOM_US * 100, 2),
                 "trim_start"      : sync_start_smp,
-                "trim_end"        : sync_end_smp,
+                "trim_end"        : sync_end_smp,            # CSV: 폴링→폴링 구간
+                "display_trim_end": sync_end_smp + sync_margin,  # PNG: +3UT 마진
             }
 
             if not ut_pass:

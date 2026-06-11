@@ -1697,14 +1697,16 @@ class MainWindow(QMainWindow):
 
                             if mode.upper().startswith('SPC'):
                                 for id_key, id_res in ch_res.get('details', {}).items():
-                                    t_s = id_res.get('trim_start')
-                                    t_e = id_res.get('trim_end')
+                                    t_s     = id_res.get('trim_start')
+                                    t_e     = id_res.get('trim_end')               # CSV: 폴링->폴링
+                                    t_e_png = id_res.get('display_trim_end', t_e)  # PNG: +3UT
                                     if t_s is None or t_e is None:
                                         print(f"[CSV] {id_key} Sync 미확보 → 저장 건너뜀")
                                         continue
                                     id_num   = id_key.replace('ID', '')
                                     pin_name = SPC_ID_PIN.get(id_num, f"SAS{id_num}")
 
+                                    # CSV: 폴링->폴링 구간
                                     ts_ = max(int(t_s), 0)
                                     te_ = min(int(t_e), len(v_full))
                                     if ts_ < te_:
@@ -1713,25 +1715,31 @@ class MainWindow(QMainWindow):
                                         trimmed_data[pin_name] = (t_us_, v_trim)
                                         dur_us = len(v_trim) / sr * 1e6
                                         print(f"[TRIM] {pin_name}  n={len(v_trim)}"
-                                              f"  {dur_us:.1f}µs  trim=[{ts_}:{te_}]")
+                                              f"  {dur_us:.1f}us  trim=[{ts_}:{te_}]")
                                         ut_us   = id_res.get('measured_ut_us', 0)
                                         err_p   = id_res.get('ut_error_pct', 0)
                                         verdict = 'PASS' if id_res.get('pass') else 'FAIL'
                                         print(f"[{verdict}] {pin_name}({id_key})"
                                               f" UT={ut_us:.4f}us  err={err_p:+.2f}%")
+                                        # PNG: 마진 포함 범위
+                                        te_png_ = min(int(t_e_png), len(v_full))
+                                        v_png   = v_full[ts_:te_png_]
+                                        t_png_  = np.arange(len(v_png)) / sr * 1e6
                                         png_path = os.path.join(
                                             img_dir, f"{sn}_{pin_name}_{timestamp}.png")
-                                        _save_channel_png(t_us_, v_trim,
+                                        _save_channel_png(t_png_, v_png,
                                                           f"{sn}  {pin_name}  ({id_key})",
                                                           png_path, ch=ch)
                             else:
-                                t_s = ch_res.get('trim_start')
-                                t_e = ch_res.get('trim_end')
+                                t_s     = ch_res.get('trim_start')
+                                t_e     = ch_res.get('trim_end')               # CSV: 폴링->폴링
+                                t_e_png = ch_res.get('display_trim_end', t_e)  # PNG: +3UT
                                 if t_s is None or t_e is None:
                                     print(f"[CSV] Ch{ch} 트리밍 정보 없음 → 저장 건너뜀")
                                     continue
                                 file_label = signal if signal else f"Ch{ch}"
 
+                                # CSV: 폴링->폴링 구간
                                 ts_ = max(int(t_s), 0)
                                 te_ = min(int(t_e), len(v_full))
                                 if ts_ < te_:
@@ -1740,15 +1748,19 @@ class MainWindow(QMainWindow):
                                     trimmed_data[file_label] = (t_us_, v_trim)
                                     dur_us = len(v_trim) / sr * 1e6
                                     print(f"[TRIM] {file_label}  n={len(v_trim)}"
-                                          f"  {dur_us:.1f}µs  trim=[{ts_}:{te_}]")
+                                          f"  {dur_us:.1f}us  trim=[{ts_}:{te_}]")
                                     ut_us  = ch_res.get('measured_ut_us', 0)
                                     err_p  = (ut_us - 3.0) / 3.0 * 100 if ut_us else 0
                                     verdict = 'PASS' if ch_res.get('pass') else 'FAIL'
                                     print(f"[{verdict}] {file_label}"
                                           f" UT={ut_us:.4f}us  err={err_p:+.2f}%")
+                                    # PNG: 마진 포함 범위
+                                    te_png_ = min(int(t_e_png), len(v_full))
+                                    v_png   = v_full[ts_:te_png_]
+                                    t_png_  = np.arange(len(v_png)) / sr * 1e6
                                     png_path = os.path.join(
                                         img_dir, f"{sn}_{file_label}_{timestamp}.png")
-                                    _save_channel_png(t_us_, v_trim,
+                                    _save_channel_png(t_png_, v_png,
                                                       f"{sn}  {file_label}  (SENT)",
                                                       png_path, ch=ch)
 

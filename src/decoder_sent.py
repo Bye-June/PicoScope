@@ -158,8 +158,10 @@ class SENTDecoder:
             "crc_expected":    crc_expected,
             "crc_valid":       crc_valid,
             # CSV 저장용 트리밍 범위 (샘플 인덱스)
-            # trim_start : SYNC 펄스 하강 엣지 (주기 시작)
-            # trim_end   : 다음 SYNC 펄스 하강 엣지 (주기 종료) → 판정에 사용된 구간과 정확히 일치
-            "trim_start": int(edges[sync_index]),
-            "trim_end":   int(edges[sync_index + 1]),
+            # trim_start       : SYNC 폄링 엣지 (주기 시작)
+            # trim_end         : 다음 SYNC 폄링 엣지 — 판정에 사용된 열만 저장 (CSV)
+            # display_trim_end : trim_end + 3UT 마진 — 이미지(PNG) 시각화용
+            "trim_start"      : int(edges[sync_index]),
+            "trim_end"        : int(edges[sync_index + 1]),
+            "display_trim_end": int(edges[sync_index + 1]) + int(actual_ut_us * 3.0 / self.sample_time_us),
         }
