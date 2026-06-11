@@ -167,7 +167,7 @@ class SPCDecoder:
                 "ut_max_us"       : UT_MAX_US,
                 "ut_nom_us"       : UT_NOM_US,
                 "ut_error_pct"    : round((measured_ut_us - UT_NOM_US) / UT_NOM_US * 100, 2),
-                "trim_start"      : trig_start,
+                "trim_start"      : sync_start_smp,
                 "trim_end"        : sync_end_smp + sync_margin,
             }
 
