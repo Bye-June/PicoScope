@@ -1732,6 +1732,10 @@ class MainWindow(QMainWindow):
                                     trim_data = _save_trimmed(v_full, t_s, t_e, csv_path)
                                     if trim_data:
                                         saved_csvs.append(csv_path)
+                                        ut_us   = id_res.get('measured_ut_us', 0)
+                                        err_p   = id_res.get('ut_error_pct', 0)
+                                        verdict = 'PASS' if id_res.get('pass') else 'FAIL'
+                                        print(f"[{verdict}] {pin_name}({id_key}) UT={ut_us:.4f}us  err={err_p:+.2f}%")
                                         png_path = os.path.join(img_dir,
                                                                  f"{sn}_{pin_name}_{timestamp}.png")
                                         _save_channel_png(trim_data[0], trim_data[1],
@@ -1750,6 +1754,11 @@ class MainWindow(QMainWindow):
                                 trim_data = _save_trimmed(v_full, t_s, t_e, csv_path)
                                 if trim_data:
                                     saved_csvs.append(csv_path)
+                                    # SENT UT 오차 콘솔 출력
+                                    ut_us  = ch_res.get('measured_ut_us', 0)
+                                    err_p  = (ut_us - 3.0) / 3.0 * 100 if ut_us else 0
+                                    verdict = 'PASS' if ch_res.get('pass') else 'FAIL'
+                                    print(f"[{verdict}] {file_label} UT={ut_us:.4f}us  err={err_p:+.2f}%")
                                     png_path = os.path.join(img_dir,
                                                              f"{sn}_{file_label}_{timestamp}.png")
                                     _save_channel_png(trim_data[0], trim_data[1],
@@ -1818,11 +1827,17 @@ class MainWindow(QMainWindow):
                         detail = ''
                         if status == 'success':
                             if 'measured_ut_us' in r:   # SENT
-                                detail = f"UT={r['measured_ut_us']:.3f}µs"
-                            elif 'frames' in r:          # SPC
-                                n_ok = sum(1 for f in r.get('frames', []) if f.get('pass', False))
-                                n_tot = len(r.get('frames', []))
-                                detail = f"{n_ok}/{n_tot} frames OK"
+                                ut  = r['measured_ut_us']
+                                err = (ut - 3.0) / 3.0 * 100
+                                detail = f"UT={ut:.4f}us  err={err:+.2f}%  (limit ±20%)"
+                            elif 'details' in r:         # SPC
+                                parts = []
+                                for id_k, id_r in sorted(r['details'].items()):
+                                    ut_v = id_r.get('measured_ut_us', 0)
+                                    ep   = id_r.get('ut_error_pct', 0)
+                                    ok_s = 'OK' if id_r.get('pass') else 'NG'
+                                    parts.append(f"{id_k}={ut_v:.4f}us({ep:+.2f}%){ok_s}")
+                                detail = '  '.join(parts) + '  (limit ±3%)'
                             elif 'v_mean' in r:          # Analog
                                 detail = f"{r['v_mean']*1000:.1f}mV p2p={r.get('p2p_noise',0)*1000:.2f}mV"
                         elif status != 'success':
