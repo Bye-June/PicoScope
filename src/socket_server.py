@@ -138,6 +138,10 @@ class MasterSocketServer(QObject):
     # ------------------------------------------------------------------
     def _parse_start(self, parts: list):
         # START,SN1,SN2,모드1,모드2,모드3   (총 6칸)
+        # 모드 형식:
+        #   SENT/TSM, SENT/TSS         → SENT 채널, 신호명 TSM/TSS
+        #   SPC/1/3, SPC/1, SPC/3     → SPC, ID 목록
+        #   Analog, 빈값              → 아날로그 / 미사용
         if len(parts) != 6:
             self._send_raw(
                 f'ERROR,START requires 6 fields, got {len(parts)}'
@@ -151,27 +155,38 @@ class MasterSocketServer(QObject):
 
         ch_triplets = [('A', 'B', 'C'), ('D', 'E', 'F')]
 
-        def parse_mode(mode_str: str) -> str:
-            m = mode_str.upper()
+        def parse_mode(mode_str: str):
+            """(mode_string, signal_name) 반환.
+            SENT/TSM  → ('SENT', 'TSM')
+            SENT/TSS  → ('SENT', 'TSS')
+            SPC/1/3   → ('SPC (ID 1, 3)', 'SPC')
+            기타       → (원본, '')
+            """
+            m = mode_str.strip().upper()
             if m.startswith('SPC'):
                 ids = [x for x in m.split('/')[1:] if x.isdigit()]
-                return 'SPC (ID ' + ', '.join(ids) + ')' if ids else 'SPC (ID 1, 3)'
-            return mode_str
-
-        mode1 = parse_mode(mode_pin1)
-        mode2 = parse_mode(mode_pin2)
-        mode3 = parse_mode(mode_pin3)
+                mode = 'SPC (ID ' + ', '.join(ids) + ')' if ids else 'SPC (ID 1, 3)'
+                return mode, 'SPC'
+            elif m.startswith('SENT'):
+                seg = m.split('/')
+                signal = seg[1] if len(seg) > 1 else ''
+                return 'SENT', signal
+            return mode_str, ''
 
         products = []
         for i in range(2):
             sn = sns[i]
             if sn:
                 ch1, ch2, ch3 = ch_triplets[i]
+                m1, s1 = parse_mode(mode_pin1)
+                m2, s2 = parse_mode(mode_pin2)
+                m3, s3 = parse_mode(mode_pin3)
                 channels = {}
-                if mode1: channels[ch1] = mode1
-                if mode2: channels[ch2] = mode2
-                if mode3: channels[ch3] = mode3
-                products.append({'sn': sn, 'channels': channels})
+                signals  = {}
+                if m1: channels[ch1] = m1;  signals[ch1] = s1
+                if m2: channels[ch2] = m2;  signals[ch2] = s2
+                if m3: channels[ch3] = m3;  signals[ch3] = s3
+                products.append({'sn': sn, 'channels': channels, 'signals': signals})
 
         if not products:
             self._send_raw('ERROR,No valid products/channels provided')

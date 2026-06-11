@@ -1648,7 +1648,8 @@ class MainWindow(QMainWindow):
             if capture_data:
                 if products:
                     for prod in products:
-                        sn = prod['sn']
+                        sn      = prod['sn']
+                        signals = prod.get('signals', {})   # {ch: 'TSM'|'TSS'|'SPC'|''}
                         prod_chs = sorted(prod['channels'].keys())
                         prod_chs = [ch for ch in prod_chs if ch in capture_data]
 
@@ -1656,31 +1657,38 @@ class MainWindow(QMainWindow):
                             v_full  = capture_data[ch]
                             ch_res  = results.get(ch, {})
                             mode    = test_config.get(ch, {}).get('mode', '')
+                            signal  = signals.get(ch, '')   # 예: 'TSM', 'TSS', 'SPC', ''
 
                             if mode.upper().startswith('SPC'):
                                 # SPC: ID별 파일 분리 저장
-                                # Sync 미확보 ID는 저장 안 함 (trim_start/trim_end 없음)
+                                # ID1 → {SN}_{ts}_SAS1.csv
+                                # ID3 → {SN}_{ts}_SAS3.csv
+                                # Sync 미확보 ID는 저장 안 함
                                 for id_key, id_res in ch_res.get('details', {}).items():
                                     t_s = id_res.get('trim_start')
                                     t_e = id_res.get('trim_end')
                                     if t_s is None or t_e is None:
-                                        # Sync 미확보 → 저장 안 함
-                                        # ※ 진단 필요 시 아래 주석 해제하여 _NOSYNC.csv 저장 가능
-                                        # nosync_path = os.path.join(save_dir, f"{sn}_{timestamp}_Ch{ch}_{id_key}_NOSYNC.csv")
-                                        # _save_trimmed(v_full, 0, min(len(v_full), 2000), nosync_path)
+                                        # ※ 진단 필요 시 아래 주석 해제 → _NOSYNC.csv 저장
+                                        # nosync = os.path.join(save_dir, f"{sn}_{timestamp}_{id_key}_NOSYNC.csv")
+                                        # _save_trimmed(v_full, 0, min(len(v_full), 2000), nosync)
                                         print(f"[CSV] {id_key} Sync 미확보 → 저장 건너뜀")
                                         continue
-                                    csv_path = os.path.join(save_dir, f"{sn}_{timestamp}_Ch{ch}_{id_key}_raw.csv")
+                                    # id_key: "ID1" → id_num: "1"
+                                    id_num = id_key.replace('ID', '')
+                                    file_label = f"SAS{id_num}"
+                                    csv_path = os.path.join(save_dir, f"{sn}_{timestamp}_{file_label}.csv")
                                     if _save_trimmed(v_full, t_s, t_e, csv_path):
                                         saved_csvs.append(csv_path)
                             else:
                                 # SENT / Analog: Sync 구간 트리밍 저장
+                                # {SN}_{ts}_{signal}.csv  (예: SN001_20260611_TSM.csv)
                                 t_s = ch_res.get('trim_start')
                                 t_e = ch_res.get('trim_end')
                                 if t_s is None or t_e is None:
                                     print(f"[CSV] Ch{ch} 트리밍 정보 없음 → 저장 건너뜀")
                                     continue
-                                csv_path = os.path.join(save_dir, f"{sn}_{timestamp}_Ch{ch}_raw.csv")
+                                file_label = signal if signal else f"Ch{ch}"
+                                csv_path = os.path.join(save_dir, f"{sn}_{timestamp}_{file_label}.csv")
                                 if _save_trimmed(v_full, t_s, t_e, csv_path):
                                     saved_csvs.append(csv_path)
                 else:
