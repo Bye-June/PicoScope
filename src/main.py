@@ -1913,11 +1913,11 @@ class MainWindow(QMainWindow):
                             else:
                                 _ut_map[_sig] = None       # Sync 미확보
 
-                # 고정 순서로 출력 (사용하지 않는 신호 슬롯은 제외)
+                # 고정 순서로 출력 — 항상 4신호 슬롯 포함 (15필드 고정)
                 _sig_order = ['TSM', 'TSS', 'SAS1', 'SAS2']
                 for _sig in _sig_order:
                     if _sig not in _ut_map:
-                        continue   # 해당 신호 미사용 모드 → 슬롯 자체 없음
+                        result_parts += [_sig, '', '']   # 미사용 모드 신호 → 빈 슬롯 포함
                     val = _ut_map[_sig]
                     if val is not None:
                         result_parts += [_sig, f'{val[0]:.4f}', f'{val[1]:+.2f}']
