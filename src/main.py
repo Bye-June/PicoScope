@@ -1635,25 +1635,6 @@ class MainWindow(QMainWindow):
             capture_data = self.sequencer.last_capture
             sr = self.hw.sample_rate_hz if self.hw.sample_rate_hz > 0 else 10e6
 
-            def _save_trimmed(v_full, t_start, t_end, csv_path):
-                """트리밍 구간을 CSV로 저장. 성공 시 (t_us, v_trim) 반환, 실패 시 None."""
-                total_n = len(v_full)
-                t_end   = min(int(t_end), total_n)
-                t_start = max(int(t_start), 0)
-                if t_start >= t_end:
-                    return None
-                v_trim = v_full[t_start:t_end]
-                n_trim = len(v_trim)
-                t_us   = np.arange(n_trim) / sr * 1e6
-                matrix = np.column_stack([t_us, v_trim])
-                header = f'time_us,{os.path.basename(csv_path).split("_")[1]}_V'
-                np.savetxt(csv_path, matrix, delimiter=',',
-                           header=header, comments='', fmt='%.6f')
-                dur_us = n_trim / sr * 1e6
-                print(f"[CSV] {os.path.basename(csv_path)}  n={n_trim}  {dur_us:.1f}µs"
-                      f"  trim=[{t_start}:{t_end}]")
-                return t_us, v_trim
-
             # 채널 → 색상 매핑 (pyqtgraph 채널 색상과 동일)
             _CH_COLOR = {
                 'A': '#2196F3',   # Blue
@@ -1703,67 +1684,105 @@ class MainWindow(QMainWindow):
                         prod_chs = sorted(prod['channels'].keys())
                         prod_chs = [ch for ch in prod_chs if ch in capture_data]
 
+                        # 통합 CSV를 위한 트림 데이터 수집
+                        # {label: (t_us, v_trim)}  예) {'TSM': (...), 'SAS2': (...)}
+                        trimmed_data = {}
+
                         for ch in prod_chs:
                             v_full  = capture_data[ch]
                             ch_res  = results.get(ch, {})
                             mode    = test_config.get(ch, {}).get('mode', '')
-                            # 신호명: 고정 배선 매핑 우선, 없으면 소켓 signals fallback
                             signals = prod.get('signals', {})
                             signal  = CH_SIGNAL_MAP.get(ch) or signals.get(ch, f'Ch{ch}')
 
                             if mode.upper().startswith('SPC'):
-                                # SPC: ID별 파일 분리 저장
-                                # ID1 → {SN}_SAS2_{ts}.csv
-                                # ID3 → {SN}_SAS1_{ts}.csv
-                                # Sync 미확보 ID는 저장 안 함
                                 for id_key, id_res in ch_res.get('details', {}).items():
                                     t_s = id_res.get('trim_start')
                                     t_e = id_res.get('trim_end')
                                     if t_s is None or t_e is None:
-                                        # ※ 진단 필요 시 아래 주석 해제 → _NOSYNC.csv 저장
-                                        # nosync = os.path.join(save_dir, f"{sn}_{timestamp}_{id_key}_NOSYNC.csv")
-                                        # _save_trimmed(v_full, 0, min(len(v_full), 2000), nosync)
                                         print(f"[CSV] {id_key} Sync 미확보 → 저장 건너뜀")
                                         continue
-                                    # id_key: "ID1"→"1", "ID3"→"3" → 핀 네이밍으로 변환
                                     id_num   = id_key.replace('ID', '')
                                     pin_name = SPC_ID_PIN.get(id_num, f"SAS{id_num}")
-                                    csv_path = os.path.join(csv_dir, f"{sn}_{pin_name}_{timestamp}.csv")
-                                    trim_data = _save_trimmed(v_full, t_s, t_e, csv_path)
-                                    if trim_data:
-                                        saved_csvs.append(csv_path)
+
+                                    ts_ = max(int(t_s), 0)
+                                    te_ = min(int(t_e), len(v_full))
+                                    if ts_ < te_:
+                                        v_trim = v_full[ts_:te_]
+                                        t_us_  = np.arange(len(v_trim)) / sr * 1e6
+                                        trimmed_data[pin_name] = (t_us_, v_trim)
+                                        dur_us = len(v_trim) / sr * 1e6
+                                        print(f"[TRIM] {pin_name}  n={len(v_trim)}"
+                                              f"  {dur_us:.1f}µs  trim=[{ts_}:{te_}]")
                                         ut_us   = id_res.get('measured_ut_us', 0)
                                         err_p   = id_res.get('ut_error_pct', 0)
                                         verdict = 'PASS' if id_res.get('pass') else 'FAIL'
-                                        print(f"[{verdict}] {pin_name}({id_key}) UT={ut_us:.4f}us  err={err_p:+.2f}%")
-                                        png_path = os.path.join(img_dir,
-                                                                 f"{sn}_{pin_name}_{timestamp}.png")
-                                        _save_channel_png(trim_data[0], trim_data[1],
+                                        print(f"[{verdict}] {pin_name}({id_key})"
+                                              f" UT={ut_us:.4f}us  err={err_p:+.2f}%")
+                                        png_path = os.path.join(
+                                            img_dir, f"{sn}_{pin_name}_{timestamp}.png")
+                                        _save_channel_png(t_us_, v_trim,
                                                           f"{sn}  {pin_name}  ({id_key})",
                                                           png_path, ch=ch)
                             else:
-                                # SENT / Analog: Sync 구간 트리밍 저장
-                                # {SN}_{signal}_{ts}.csv  (예: SN001_TSM_20260611_104933.csv)
                                 t_s = ch_res.get('trim_start')
                                 t_e = ch_res.get('trim_end')
                                 if t_s is None or t_e is None:
                                     print(f"[CSV] Ch{ch} 트리밍 정보 없음 → 저장 건너뜀")
                                     continue
                                 file_label = signal if signal else f"Ch{ch}"
-                                csv_path = os.path.join(csv_dir, f"{sn}_{file_label}_{timestamp}.csv")
-                                trim_data = _save_trimmed(v_full, t_s, t_e, csv_path)
-                                if trim_data:
-                                    saved_csvs.append(csv_path)
-                                    # SENT UT 오차 콘솔 출력
+
+                                ts_ = max(int(t_s), 0)
+                                te_ = min(int(t_e), len(v_full))
+                                if ts_ < te_:
+                                    v_trim = v_full[ts_:te_]
+                                    t_us_  = np.arange(len(v_trim)) / sr * 1e6
+                                    trimmed_data[file_label] = (t_us_, v_trim)
+                                    dur_us = len(v_trim) / sr * 1e6
+                                    print(f"[TRIM] {file_label}  n={len(v_trim)}"
+                                          f"  {dur_us:.1f}µs  trim=[{ts_}:{te_}]")
                                     ut_us  = ch_res.get('measured_ut_us', 0)
                                     err_p  = (ut_us - 3.0) / 3.0 * 100 if ut_us else 0
                                     verdict = 'PASS' if ch_res.get('pass') else 'FAIL'
-                                    print(f"[{verdict}] {file_label} UT={ut_us:.4f}us  err={err_p:+.2f}%")
-                                    png_path = os.path.join(img_dir,
-                                                             f"{sn}_{file_label}_{timestamp}.png")
-                                    _save_channel_png(trim_data[0], trim_data[1],
+                                    print(f"[{verdict}] {file_label}"
+                                          f" UT={ut_us:.4f}us  err={err_p:+.2f}%")
+                                    png_path = os.path.join(
+                                        img_dir, f"{sn}_{file_label}_{timestamp}.png")
+                                    _save_channel_png(t_us_, v_trim,
                                                       f"{sn}  {file_label}  (SENT)",
                                                       png_path, ch=ch)
+
+                        # --- 통합 CSV 저장 (제품별 1개) ---
+                        if trimmed_data:
+                            col_order = ['TSM', 'TSS', 'SAS1', 'SAS2']
+                            labels = [l for l in col_order if l in trimmed_data]
+                            labels += [l for l in sorted(trimmed_data) if l not in col_order]
+
+                            max_n    = max(len(trimmed_data[l][1]) for l in labels)
+                            t_common = np.arange(max_n) / sr * 1e6
+
+                            cols_arr     = [t_common]
+                            header_parts = ['time_us']
+                            for label in labels:
+                                _, v_l = trimmed_data[label]
+                                n_l    = len(v_l)
+                                if n_l < max_n:
+                                    v_padded = np.concatenate(
+                                        [v_l, np.full(max_n - n_l, np.nan)])
+                                else:
+                                    v_padded = v_l[:max_n]
+                                cols_arr.append(v_padded)
+                                header_parts.append(f'{label}_V')
+
+                            matrix   = np.column_stack(cols_arr)
+                            csv_path = os.path.join(csv_dir, f'{sn}_{timestamp}.csv')
+                            np.savetxt(csv_path, matrix, delimiter=',',
+                                       header=','.join(header_parts),
+                                       comments='', fmt='%.6f')
+                            saved_csvs.append(csv_path)
+                            print(f"[CSV] {os.path.basename(csv_path)}"
+                                  f"  {len(labels)}ch: {', '.join(labels)}")
+
                 else:
                     # 수동 검사: 전 채널 풀 캡처 저장
                     active_chs = sorted(capture_data.keys())
