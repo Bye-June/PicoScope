@@ -1856,7 +1856,7 @@ class MainWindow(QMainWindow):
                                     ep   = id_r.get('ut_error_pct', 0)
                                     ok_s = 'OK' if id_r.get('pass') else 'NG'
                                     parts.append(f"{id_k}={ut_v:.4f}us({ep:+.2f}%){ok_s}")
-                                detail = '  '.join(parts) + '  (limit ±3%)'
+                                detail = '  '.join(parts) + '  (limit ±5%)'
                             elif 'v_mean' in r:          # Analog
                                 detail = f"{r['v_mean']*1000:.1f}mV p2p={r.get('p2p_noise',0)*1000:.2f}mV"
                         elif status != 'success':
@@ -1882,10 +1882,35 @@ class MainWindow(QMainWindow):
                     result_parts.append(sn)
                     result_parts.append(prod_label)
 
-                # 빈 자리 채우기 (2제품 고정 포맷)
+                # 빈 자리 채우기 (2제품 고정 포맷: RESULT,SN1,판정,SN2,판정)
                 while len(result_parts) < 5:
                     result_parts.extend(['', ''])
-                self.socket_server.send_result(','.join(result_parts[:5]))
+
+                # [5]~ UT 상세 데이터 추가: 신호명,UT_us,err%  순서로 반복
+                # 순서: TSM → TSS → SAS1 → SAS2 (제품 순)
+                _sig_order = ['TSM', 'TSS', 'SAS1', 'SAS2']
+                for prod in products:
+                    _chs = prod['channels']
+                    _signals = prod.get('signals', {})
+                    for _ch, _mode in sorted(_chs.items()):
+                        _r = results.get(_ch, {})
+                        if _mode.upper().startswith('SPC'):
+                            # SPC: ID별 핀 이름 순으로
+                            for _id_k, _id_r in sorted(_r.get('details', {}).items()):
+                                _id_num  = _id_k.replace('ID', '')
+                                _pin     = SPC_ID_PIN.get(_id_num, f'SAS{_id_num}')
+                                _ut      = _id_r.get('measured_ut_us', 0)
+                                _ep      = _id_r.get('ut_error_pct', 0)
+                                result_parts += [_pin, f'{_ut:.4f}', f'{_ep:+.2f}']
+                        elif 'measured_ut_us' in _r:   # SENT
+                            _sig = (CH_SIGNAL_MAP.get(_ch)
+                                    or _signals.get(_ch, f'Ch{_ch}')
+                                    or f'Ch{_ch}')
+                            _ut  = _r['measured_ut_us']
+                            _ep  = (_ut - 3.0) / 3.0 * 100
+                            result_parts += [_sig, f'{_ut:.4f}', f'{_ep:+.2f}']
+
+                self.socket_server.send_result(','.join(result_parts))
 
             else:
                 # 수동 검사: 전체 채널 로그
